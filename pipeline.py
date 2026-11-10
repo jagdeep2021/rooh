@@ -239,8 +239,57 @@ def vessel_at(gray: np.ndarray, y: int, x: int, max_area: int):
     return None
 
 
+VESSEL_NECK = 0.45   # a vessel click: bulges joined by a neck narrower than 2 x 0.45 x the vessel's inscribed radius go
+VESSEL_ROUND = 1.5   # ... and nothing further than 1.5 x that radius from its centre (metaxylem vessels are round)
+
+
+def vessel_space(gray, cells, mx, y, x, max_area: int):
+    """A vessel at a click (2026-11-10): the space no other cell or vessel owns (the cell under the click, if any,
+    is taken as part of the vessel), that is also dark (Otsu in a window, holes filled: a bright speck in a DAPI
+    lumen is lumen), thin wall lines cut, then kept round: only what lies within VESSEL_ROUND x the largest circle
+    that holds the click, with bulges through narrow necks (VESSEL_NECK) cut. Outlined neighbours stop it however
+    dark their lumens; darkness stops it where neighbours were never outlined. None = no vessel found here."""
+    own = int(cells[y, x])
+    free = ((cells == 0) | (cells == own)) & (mx == 0) if own else (cells == 0) & (mx == 0)
+    r = int(np.sqrt(max_area / np.pi) * 1.5)
+    y0, x0 = max(y - r, 0), max(x - r, 0)
+    fw = free[y0:y + r + 1, x0:x + r + 1]
+    cy, cx = y - y0, x - x0
+    g = filters.gaussian(gray[y0:y + r + 1, x0:x + r + 1], 1.5)
+    if fw.sum() > 10 and np.ptp(g[fw]) > 0:
+        dark = ndi.binary_fill_holes(g < filters.threshold_otsu(g[fw]))
+        if dark[cy, cx]:
+            fw = fw & dark
+    f = ndi.binary_opening(fw, morphology.disk(3))
+    if not f[cy, cx]:
+        return None
+    lab, _ = ndi.label(f)
+    reg = ndi.binary_fill_holes(lab == lab[cy, cx])
+    dt = ndi.distance_transform_edt(np.pad(reg, 1))[1:-1, 1:-1]
+    yy, xx = np.indices(dt.shape)
+    holds = np.where(np.hypot(yy - cy, xx - cx) < dt, dt, 0)     # circles inside it that hold the click
+    if not holds.any():
+        return None
+    py, px = np.unravel_index(np.argmax(holds), holds.shape)
+    ri = dt[py, px]
+    reg &= np.hypot(yy - py, xx - px) <= VESSEL_ROUND * ri
+    body = ndi.binary_opening(np.pad(reg, 2), morphology.disk(max(3, int(VESSEL_NECK * ri))))[2:-2, 2:-2]
+    lab, _ = ndi.label(body)
+    if not lab[py, px]:
+        return None
+    reg = ndi.binary_fill_holes(lab == lab[py, px])
+    if reg.sum() > max_area:
+        return None
+    reg = ndi.binary_dilation(reg, morphology.disk(2)) & free[y0:y + r + 1, x0:x + r + 1]
+    out = np.zeros(cells.shape, bool)
+    out[y0:y0 + reg.shape[0], x0:x0 + reg.shape[1]] = reg      # out to mid-wall, never into another cell
+    return out
+
+
 def add_mx(gray, mx, cells, y, x) -> int:
-    reg = vessel_at(gray, y, x, 60 * typical_cell_area(cells))
+    reg = vessel_space(gray, cells, mx, y, x, 60 * typical_cell_area(cells))
+    if reg is None:                                  # e.g. a click on a wall: the older darkness-only rule
+        reg = vessel_at(gray, y, x, 60 * typical_cell_area(cells))
     if reg is None:                                  # not dark under the click: the old fill (or a small dot)
         reg = lumen_at(gray, y, x, 60 * typical_cell_area(cells))
     new = int(mx.max()) + 1

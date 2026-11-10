@@ -365,6 +365,29 @@ def run(out_dir: Path):
         P.save_edit(npz, cells=c, mx=m)
     edit("08_add_vessel", e8, {"mx_n": 7, "mx_mean_area_px": np.pi * MX_R ** 2})
 
+    # 8b: a vessel removed, then clicked back in: the same vessel, no stele cell touched
+    def e8b(npz, c, rg, m):
+        y, x = at(MX_AT, 135)
+        P.click_edit(gray, c, rg, m, "Metaxylem", y, x, remove=True)
+        P.click_edit(gray, c, rg, m, "Metaxylem", y, x)
+        P.save_edit(npz, cells=c, mx=m)
+    edit("08b_click_vessel_back", e8b, {"mx_n": 6, "mx_mean_area_px": np.pi * MX_R ** 2})
+    # 8c: the same, but a gap in the vessel wall opens onto a neighbouring stele cell whose lumen is as dark as the
+    # vessel (as in Amool's B73 images): the click must not run into it (2026-11-10: it took 1.5-2x the vessel)
+    def e8c(npz, c, rg, m):
+        y, x = at(MX_AT, 135)
+        g = gray.copy()
+        nb = c[at(MX_AT + MX_R + 6, 135)]                   # the stele cell just outside the vessel
+        g[c == nb] = 0.05
+        gy, gx = at(MX_AT + MX_R, 135)
+        g[gy - 3:gy + 4, gx - 3:gx + 4] = 0.05              # a gap in the wall between them
+        P.click_edit(g, c, rg, m, "Metaxylem", y, x, remove=True)
+        n0 = (c == nb).sum()
+        P.click_edit(g, c, rg, m, "Metaxylem", y, x)
+        check("08c_vessel_wall_gap", "neighbour cell kept whole", int((c == nb).sum()), int(n0))
+        P.save_edit(npz, cells=c, mx=m)
+    edit("08c_vessel_wall_gap", e8c, {"mx_n": 6, "mx_mean_area_px": np.pi * MX_R ** 2})
+
     # 9: stele redrawn wider, taking cortex layer 1
     def e9(npz, c, rg, m):
         P.outline_edit(c, rg, m, "Stele", RR < EDGES[1])
