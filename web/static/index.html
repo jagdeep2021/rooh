@@ -85,6 +85,13 @@
   main .rulerpop input { width:64px; }
   main .hint { position:absolute; left:10px; bottom:10px; right:10px; color:#ccc; font-size:12px; pointer-events:none; }
   main .hint span { background:rgba(0,0,0,.7); padding:3px 8px; border-radius:4px; }
+  main .zoombar { position:absolute; z-index:4; right:10px; top:50%; transform:translateY(-50%); display:flex; flex-direction:column;
+                  align-items:center; gap:6px; padding:8px 5px; background:rgba(20,20,20,.78); border:1px solid #444; border-radius:8px; }
+  main .zoombar[hidden] { display:none; }
+  main .zoombar button { width:28px; height:26px; padding:0; font-size:16px; line-height:1; color:#eee; background:#2a2a2a; border:1px solid #555; border-radius:5px; }
+  main .zoombar #zoomFit { font-size:11px; height:22px; }
+  main .zoombar input { writing-mode:vertical-lr; direction:rtl; width:22px; height:180px; margin:0; accent-color:#ddd; }
+  main .zoombar span { color:#ddd; font-size:11px; font-variant-numeric:tabular-nums; }
   main .empty { position:absolute; inset:0; display:grid; place-items:center; color:#999; padding:24px; text-align:center; }
 
   /* right: edit, then this image's graphs */
@@ -182,6 +189,13 @@
 
 <main id="view">
   <canvas id="cv"></canvas>
+  <div class="zoombar" id="zoomBar" hidden title="Zoom: drag the bar (the mouse wheel does the same)">
+    <button type="button" id="zoomIn" title="Zoom in">+</button>
+    <input type="range" id="zoom" min="-1" max="5.4" step="0.01" value="0" aria-label="Zoom">
+    <button type="button" id="zoomOut" title="Zoom out">−</button>
+    <span id="zoomTxt">1×</span>
+    <button type="button" id="zoomFit" title="Fit the image (F)">Fit</button>
+  </div>
   <div id="rulerBox" class="rulerpop" hidden>Scale bar <b id="rulerPx"></b> =
     <input type="number" id="rulerUm" min="0" step="any" value="100" title="The scale bar's length in µm"> µm
     <button id="rulerSet">Set</button><button id="rulerX" title="Cancel (Esc)">✕</button></div>
@@ -205,6 +219,7 @@
   <div class="keys"><b>Drag</b> draws · <b>click</b> adds · hold <b>⌘/Ctrl</b> to remove instead</div>
   <div class="row view"><span style="width:44px">Cells</span><input type="range" id="opCells" min="0" max="1" step="0.05" value="1" title="Cell outlines">
     <button id="fitBtn" title="Fit the image (F)">Fit</button></div>
+  <div class="row view"><button id="undoBtn" title="Undo the last edit on this image (⌘/Ctrl-Z), up to 30 back">↶ Undo</button></div>
   <div class="row view"><span style="width:44px">Masks</span><input type="range" id="opMasks" min="0" max="1" step="0.05" value="1" title="Root, stele, vessels, excluded sectors"><span style="width:36px"></span></div>
   <div class="row view"><button id="aerBtn" class="on" title="Show / hide the aerenchyma lacunae Make results counts (Shift-A)">Aerenchyma</button>
     <button id="filesBtn" title="Colour cells by cell file number, 1 (next to the stele, blue) to 15+ (red); same scale on every image (Shift-F)">Cell files</button></div>
@@ -468,6 +483,26 @@ function drawTraits() {                           // bar = this image; tick = th
 }
 
 // ---------------------------------------------------------------- drawing the view
+function fitScale() { const r = cv.getBoundingClientRect(); return Math.min(r.width / S.gray.width, r.height / S.gray.height) * 0.96; }
+function zoomTo(z) {                              // zoom slider: z = times the fitted size, about the view's centre
+  if (!S.gray || !S.view) return;
+  const r = cv.getBoundingClientRect(), cx = r.width / 2, cy = r.height / 2, f = fitScale() * z / S.view.s;
+  S.view.x = cx - (cx - S.view.x) * f; S.view.y = cy - (cy - S.view.y) * f; S.view.s *= f; draw();
+}
+function syncZoom() {                             // the slider follows the wheel, Fit and image changes
+  $("zoomBar").hidden = !S.gray || !S.view;
+  if (!S.gray || !S.view) return;
+  const z = S.view.s / fitScale();
+  if (document.activeElement !== $("zoom")) $("zoom").value = Math.log2(z);
+  $("zoomTxt").textContent = (z < 10 ? z.toFixed(1) : Math.round(z)) + "×";
+}
+$("zoom").oninput = e => zoomTo(2 ** +e.target.value);
+const zoomStep = k => { if (S.gray && S.view) zoomTo(Math.min(2 ** 5.4, Math.max(0.5, S.view.s / fitScale() * k))); };
+$("zoomIn").onclick = e => { zoomStep(1.5); e.currentTarget.blur(); };
+$("zoomOut").onclick = e => { zoomStep(1 / 1.5); e.currentTarget.blur(); };
+$("zoomFit").onclick = e => { if (S.gray) { fit(); draw(); } e.currentTarget.blur(); };
+for (const id of ["zoom", "opCells", "opMasks"])   // let go of a slider: keys (F, 1-6, arrows) go back to the image
+  $(id).addEventListener("change", e => e.target.blur());
 function fit() {
   const r = cv.getBoundingClientRect(), s = Math.min(r.width / S.gray.width, r.height / S.gray.height) * 0.96;
   S.view = { s, x: (r.width - S.gray.width * s) / 2, y: (r.height - S.gray.height * s) / 2 };
@@ -506,6 +541,7 @@ function draw() {
     ctx.stroke(); ctx.setLineDash([]);
   }
   placeRuler();
+  syncZoom();
 }
 function drawSectors() {                          // as in the desktop app: excluded arcs grey on the cortex only
   const { s, x, y } = S.view, { centre: [cy, cx], arcs, rst, rrt } = S.sectors;   // (stele edge -> root edge),
@@ -586,6 +622,22 @@ async function applyEdit(pts, remove) {
   } catch (e) { $("editMsg").textContent = ""; showErr(e); }
   finally { S.saving = false; S.pen = null; draw(); }
 }
+async function undo() {                           // the server puts back this image's npz from before its last edit
+  while (S.saving) await new Promise(ok => setTimeout(ok, 100));   // pressed during a save: undo that edit once saved
+  S.pen = null;                                    // a half-drawn outline is dropped, not saved
+  const im = S.images[S.i];
+  if (!im || im.status === "not measured") return;
+  S.saving = true; $("editMsg").textContent = "Undoing…";
+  try {
+    const r = await api(`/api/projects/${enc(S.project)}/undo`, form({ rel: im.image }));
+    im.status = r.status;
+    await show(S.i);
+    await refresh();
+    $("editMsg").textContent = r.undo ? `Undone (${r.undo} more to undo).` : "Undone (nothing more to undo).";
+  } catch (e) { $("editMsg").textContent = ""; showErr(e); }
+  finally { S.saving = false; draw(); }
+}
+$("undoBtn").onclick = undo;
 const editable = () => { const im = S.images[S.i]; return im && im.status !== "not measured" && !S.saving; };
 cv.addEventListener("wheel", e => {
   e.preventDefault();
@@ -678,9 +730,29 @@ function toggleFiles() { S.showFiles = !S.showFiles; $("filesBtn").classList.tog
 $("filesBtn").onclick = toggleFiles;
 $("fitBtn").onclick = () => { if (S.gray) { fit(); draw(); } };
 const KEYS = { 1: "Cell", 2: "Metaxylem", 3: "Stele", 4: "Sectors", 5: "Root", 6: "Aerenchyma" };
+addEventListener("keydown", e => {                // Ctrl/Cmd-Z = Undo, whatever has focus and whichever tool is on
+  if ((e.code === "KeyZ" || e.key.toLowerCase() === "z") && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+    e.preventDefault(); e.stopPropagation(); document.activeElement?.blur?.(); undo();
+  }
+}, true);
+// Space held = move the image (drag), whatever has focus: before this, a focused button (a tool, Save + next) took the
+// Space as its own click and a focused slider or menu swallowed it. Only typing in a text or number box keeps Space.
+const typingIn = el => el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && !["range", "checkbox", "radio", "button", "submit", "file", "color"].includes(el.type)));
 addEventListener("keydown", e => {
+  if (e.code !== "Space" || typingIn(e.target)) return;
+  e.preventDefault(); e.stopPropagation();
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  S.space = true; cv.classList.add("pan");
+}, true);
+addEventListener("keyup", e => {
+  if (e.code !== "Space" || typingIn(e.target)) return;
+  e.preventDefault(); e.stopPropagation();                 // a button never gets the Space as a click
+  S.space = false; if (!S.pan) cv.classList.remove("pan");
+}, true);
+addEventListener("blur", () => { S.space = false; if (!S.pan) cv.classList.remove("pan"); });   // Space let go in another window
+addEventListener("keydown", e => {
+  if ((e.metaKey || e.ctrlKey) && e.code === "KeyZ") return;
   if (["INPUT", "SELECT"].includes(e.target.tagName)) return;
-  if (e.key === " ") { e.preventDefault(); S.space = true; cv.classList.add("pan"); }
   if (e.key === "ArrowRight" || e.key === ".") show(S.i + 1).catch(showErr);
   if (e.key === "ArrowLeft" || e.key === ",") show(S.i - 1).catch(showErr);
   if (e.key === "S" && e.shiftKey) saveNext();
@@ -692,7 +764,6 @@ addEventListener("keydown", e => {
   if ((e.key === "f" || e.key === "F") && !e.shiftKey && S.gray) { fit(); draw(); }
   if (KEYS[e.key]) setTarget(KEYS[e.key]);
 });
-addEventListener("keyup", e => { if (e.key === " ") { S.space = false; if (!S.pan) cv.classList.remove("pan"); } });
 setTarget(S.target);
 
 // ---------------------------------------------------------------- people (admins)
