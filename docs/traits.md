@@ -140,14 +140,16 @@ Undefined features are blank: a peak at the first point has no rise, and a peak 
 **A lacuna:**
 - Starts from non-cell pixels inside the root, outside the stele and the metaxylem. These are opened with a disc of radius max(2, 0.1 × √median cortical cell area), so thin walls and slits drop out, then grown back.
 - Each piece is kept as a lacuna if it is ≥ 2× the median cortical cell area, touches neither the 6 px edge band nor the stele (dilated 3 px), and has its centre in the kept angles.
+- **A lacuna a reviewer draws** (Aerenchyma mode) counts whatever the size, edge and stele rules say, as long as its centre is in the kept angles. Real aerenchyma can reach the endodermis; the automatic stele rule stays because the gaps it drops are almost always stele-outline errors (all 10 in the shipped examples, 2026-11-10). A later ⌘/Ctrl-click "not a lacuna" still wins.
 
 | Column | How |
 |---|---|
 | `n_lacunae`, `lacuna_area` | Count and total area. |
 | `aerenchyma_share` | lacuna area / `cortex_area_kept`. |
 | `n_lacunae_overridden` | Gaps the rule would count that a reviewer marked **not a lacuna** (Aerenchyma mode, ⌘/Ctrl-click; marks kept in the image's npz). Not in `n_lacunae` or `aerenchyma_share`. Non-zero = a reviewer's judgement changed this image's aerenchyma. |
+| `n_lacunae_drawn` | Lacunae a reviewer drew; included in `n_lacunae` and `aerenchyma_share`. Non-zero = a reviewer's judgement added aerenchyma the automatic rule would not count (or count differently). |
 | `lacuna_r_norm_mean` | Mean `r_norm` of the lacuna pixels, which weights each lacuna by its area. Where in the cortex the aerenchyma sits. |
-| sheet `lacunae` | One row per lacuna: area, angle, quarter, `r_norm` mean / inner / outer. |
+| sheet `lacunae` | One row per lacuna: drawn or not, area, angle, quarter, `r_norm` mean / inner / outer. |
 | sheet `aerenchyma_profile` | Per `r_norm` bin: lacuna pixels / root-outside-stele pixels, kept angles. |
 
 ## 8. Analysis rules

@@ -306,7 +306,8 @@ def overlay_png(d: Path, rel: str, part: str) -> Path:
     elif part == "lacunae":                            # aerenchyma lacunae as Make results finds them (kept angles)
         if (region == 2).any():
             *_, centre, arcs, props, _ = _live(d, npz)
-            lab = P.lacunae(cells, region, mx, props, centre, arcs, mask=True, not_lacuna=P.load_not_lacuna(npz))[3]
+            lab = P.lacunae(cells, region, mx, props, centre, arcs, mask=True, not_lacuna=P.load_not_lacuna(npz),
+                             drawn=P.load_drawn_lacuna(npz))[3]
             rgba[lab < 0] = OVERLAY["lacuna_off"]        # a reviewer said: not a lacuna
             lac = lab > 0
             rgba[lac] = OVERLAY["lacuna"]
@@ -601,7 +602,8 @@ def traits(name: str, rel: str, u: dict = Depends(user)):
         raise HTTPException(404, "Not measured yet")
     cells, region, mx, status, centre, arcs, props, tr = _live(d, npz)
     tr.update(P.sector_traits(cells, region, props, centre, arcs))   # cortex: kept angles; stele, vessels: whole
-    lac, _, n_gaps = P.lacunae(cells, region, mx, props, centre, arcs, not_lacuna=P.load_not_lacuna(npz))
+    lac, _, n_gaps = P.lacunae(cells, region, mx, props, centre, arcs, not_lacuna=P.load_not_lacuna(npz),
+                               drawn=P.load_drawn_lacuna(npz))
     tr.update(P.lacuna_traits(lac, n_gaps, tr["cortex_area_kept_px"]))
     if not tr.get("stele_found", (region == 2).any()):   # as in the results: no stele -> blank, not 0
         tr.update({k: None for k in P.NEEDS_STELE if k in tr})
@@ -695,10 +697,11 @@ def edit(name: str, rel: str = Form(...), target: str = Form(...), points: str =
     if target == "Aerenchyma":                     # pipeline.lacuna_edit: draw = a lacuna; Cmd/Ctrl-click = not one
         cells, region, mx, _, centre, arcs, props, _ = _live(d, npz)
         cells = cells.copy()
-        old = P.load_not_lacuna(npz)
-        marks, note = P.lacuna_edit(cells, region, mx, props, centre, arcs, old, pts, remove)
-        if marks != old or len(pts) > 2:
-            _save(d, npz, cells=cells, **P.not_lacuna_arrays(marks))
+        old, drawn0 = P.load_not_lacuna(npz), P.load_drawn_lacuna(npz)
+        drawn = list(drawn0)
+        marks, note = P.lacuna_edit(cells, region, mx, props, centre, arcs, old, pts, remove, drawn=drawn)
+        if marks != old or drawn != drawn0 or len(pts) > 2:
+            _save(d, npz, cells=cells, **P.not_lacuna_arrays(marks), **P.drawn_lacuna_arrays(drawn))
         return {**traits(name, rel, u), "note": note, "undo": _undo_left(d, npz)}
     cells, region, mx = cells.copy(), region.copy(), mx.copy()
     note = ""

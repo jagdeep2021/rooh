@@ -429,6 +429,37 @@ def run(out_dir: Path):
         P.save_edit(npz, cells=c)
     edit("11d_tear_at_stele", e11d, {"n_lacunae": 0})
 
+    # 11h: a reviewer draws a lacuna against the stele (layer 1-2 cells, 100-140 deg): the drawn lacuna counts even
+    # though the automatic rule never counts a gap touching the stele (real aerenchyma can reach the endodermis;
+    # decided 2026-11-10). The same gap undrawn is case 11d: not counted.
+    def draw_lac(c, rg, m, r0, r1, t0, t1, drawn):
+        props = P.derive(c, rg, m, 0, C)[0]
+        pts = [at(r0, t) for t in np.linspace(t0, t1, 40)] + [at(r1, t) for t in np.linspace(t1, t0, 40)]
+        return P.lacuna_edit(c, rg, m, props, C, [], [], pts, drawn=drawn)[0]
+    def e11h(npz, c, rg, m):
+        drawn = []
+        draw_lac(c, rg, m, R_STELE - 2, EDGES[2] - 1, 100.5, 139.5, drawn)
+        P.save_edit(npz, cells=c, **P.drawn_lacuna_arrays(drawn))
+    i11h = edit("11h_drawn_at_stele", e11h, {"n_lacunae": 1, "n_lacunae_drawn": 1, "n_lacunae_overridden": 0},
+                "drawn lacuna touching the stele counts")
+    # 11i: a drawn lacuna of one cell (below the 2x-median size rule) counts too: the reviewer's call
+    def e11i(npz, c, rg, m):
+        drawn = []
+        draw_lac(c, rg, m, EDGES[4] + 1, EDGES[5] - 1, 26, 34, drawn)
+        P.save_edit(npz, cells=c, **P.drawn_lacuna_arrays(drawn))
+    edit("11i_drawn_one_cell", e11i, {"n_lacunae": 1, "n_lacunae_drawn": 1, "n_gaps_missed_cell": 0},
+         "a drawn one-cell lacuna counts, and is not a missed-cell hint")
+    # 11j: Cmd/Ctrl-click on a drawn lacuna: not a lacuna after all (the newest call wins). It touches the stele, so
+    # the automatic rule would not count it either: not "overridden" (that counts only gaps the rule would count)
+    def e11j(npz, c, rg, m):
+        drawn = []
+        draw_lac(c, rg, m, R_STELE - 2, EDGES[2] - 1, 100.5, 139.5, drawn)
+        props = P.derive(c, rg, m, 0, C)[0]
+        marks, _ = P.lacuna_edit(c, rg, m, props, C, [], [], [at((R_STELE + EDGES[2]) / 2, 120)], remove=True,
+                                 drawn=drawn)
+        P.save_edit(npz, cells=c, **P.drawn_lacuna_arrays(drawn), **P.not_lacuna_arrays(marks))
+    edit("11j_drawn_then_unmarked", e11j, {"n_lacunae": 0, "n_lacunae_drawn": 0, "n_lacunae_overridden": 0})
+
     # 11e: no stele (a root tip, or the stele cut off by the frame): stele / cortex traits blank, never 0
     def e11e(npz, c, rg, m):
         rg[rg == 2] = 1

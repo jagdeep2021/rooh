@@ -603,7 +603,7 @@ NEEDS_STELE = ("n_cortical_layers", "n_cortical_layers_min", "n_cortical_layers_
                "cortex_width_px", "cortex_area_kept_px", "cortex_area_est_px", "stele_share_est",
                "n_cortex_cells_est", "n_air_spaces_est", "n_giant_cortex_cells", "stele_area_px", "mx_n",
                "mx_mean_area_px", "mx_total_area_px", "n_lacunae", "lacuna_area_px", "n_gaps_missed_cell",
-               "aerenchyma_share", "lacuna_r_norm_mean", "n_lacunae_overridden")
+               "aerenchyma_share", "lacuna_r_norm_mean", "n_lacunae_overridden", "n_lacunae_drawn")
 
 
 DIST_BIN_UM = 20.0   # basis "distance": bin width in µm from the stele edge (decided 2026-11-04)
@@ -676,6 +676,10 @@ def quarter_kept_deg(arcs, q: int) -> float:
 # between cells are broken by an opening first; air spaces (small objects at cell junctions) stay their own class.
 # Checked 2026-11-03 on Hallie's maize (no aerenchyma): the 1x-median rule found 6 false lacunae (missed cells, a
 # tear at the stele); with these two rules none.
+# A lacuna the reviewer DRAWS (Aerenchyma mode) counts whatever these rules say (decided 2026-11-10): real
+# aerenchyma can reach the endodermis, but the automatic stele rule stays (all 10 gaps it drops in the shipped
+# examples were stele-outline errors, none aerenchyma). Drawn = a point kept in the npz (lacuna_drawn), reported as
+# n_lacunae_drawn. A later "not a lacuna" (Cmd/Ctrl-click) still wins over a drawn one.
 LACUNA_MIN_CELLS = 2.0
 GAP_MIN_CELLS = 0.5
 def pixel_position(region: np.ndarray, centre):
@@ -688,19 +692,21 @@ def pixel_position(region: np.ndarray, centre):
     return (r - r_st[d]) / np.maximum(r_rt[d] - r_st[d], 1), deg
 
 
-def lacunae(cells, region, mx, props, centre, arcs=(), n_bins: int = 10, mask: bool = False, not_lacuna=()):
+def lacunae(cells, region, mx, props, centre, arcs=(), n_bins: int = 10, mask: bool = False, not_lacuna=(),
+            drawn=()):
     """(per-lacuna table, aerenchyma profile per r_norm bin, n_gaps_missed_cell[, label image if mask]). props: after
     exclude_sectors. Only lacunae whose centre is in the kept angles count; the profile = lacuna pixels / cortex pixels
     per bin, kept angles. mask=True also returns the lacunae as a label image (the editors shade them): > 0 counted,
     -1 = a gap the rule would count that a reviewer marked "not a lacuna" (not_lacuna: their (y, x) marks; counted in
-    table.attrs["n_overridden"], reported as n_lacunae_overridden)."""
+    table.attrs["n_overridden"], reported as n_lacunae_overridden). drawn: the reviewer's "this is a lacuna" points
+    (lacuna_edit): a gap holding one counts whatever the size / edge / stele rules say (table.attrs["n_drawn"])."""
     root, stele = region >= 1, region == 2
     c = props[props.tissue == "cortex"]
     med = float(c.area_px.median()) if len(c) else np.nan
     rn, deg = pixel_position(region, centre)
     ctx = root & ~stele & ~in_arcs(deg, arcs)
     bins = np.clip((np.clip(rn, 0, 0.999) * n_bins).astype(int), 0, n_bins - 1)
-    empty = pd.DataFrame(columns=["lacuna", "area_px", "y", "x", "angle_deg", "quarter", "r_norm", "r_norm_inner",
+    empty = pd.DataFrame(columns=["lacuna", "drawn", "area_px", "y", "x", "angle_deg", "quarter", "r_norm", "r_norm_inner",
                                   "r_norm_outer"])
     lab = np.zeros(region.shape, np.int32)
     n_gaps = 0
@@ -711,16 +717,24 @@ def lacunae(cells, region, mx, props, centre, arcs=(), n_bins: int = 10, mask: b
         core = segmentation.expand_labels(core, rad) * gap
         edge = root & ~morphology.erosion(root, morphology.disk(6))
         near_stele = morphology.dilation(stele, morphology.disk(3))
-        rows, n_over = [], 0
-        marks = [(int(round(y)), int(round(x))) for y, x in not_lacuna
-                 if 0 <= round(y) < region.shape[0] and 0 <= round(x) < region.shape[1]]
+        rows, n_over, n_drawn = [], 0, 0
+        inside = lambda pts: [(int(round(y)), int(round(x))) for y, x in pts
+                              if 0 <= round(y) < region.shape[0] and 0 <= round(x) < region.shape[1]]
+        marks, yes = inside(not_lacuna), inside(drawn)
+        if yes:                                    # a drawn lacuna is kept whole: no opening splits it or drops it
+            ylab = measure.label(gap)
+            keep = np.isin(ylab, [ylab[y, x] for y, x in yes if ylab[y, x]])
+            core = measure.label((core > 0) | keep)
         for g in measure.regionprops(core):
             m = core == g.label
             cy, cx = g.centroid
             a = float(angle_of(cy, cx, centre))
-            if (m & edge).any() or (m & near_stele).any() or (arcs and in_arcs([a], arcs)[0]):
+            is_drawn = any(m[y, x] for y, x in yes)
+            if arcs and in_arcs([a], arcs)[0]:          # an excluded (damaged) arc: never counted, drawn or not
                 continue
-            if g.area < LACUNA_MIN_CELLS * med:
+            if not is_drawn and ((m & edge).any() or (m & near_stele).any()):
+                continue
+            if not is_drawn and g.area < LACUNA_MIN_CELLS * med:
                 n_gaps += int(g.area >= GAP_MIN_CELLS * med)
                 continue
             if any(m[y, x] for y, x in marks):       # a reviewer said: not a lacuna
@@ -728,13 +742,15 @@ def lacunae(cells, region, mx, props, centre, arcs=(), n_bins: int = 10, mask: b
                 n_over += 1
                 continue
             lab[m] = len(rows) + 1
-            rows.append({"lacuna": len(rows) + 1, "area_px": int(g.area), "y": cy, "x": cx, "angle_deg": a,
+            n_drawn += is_drawn
+            rows.append({"lacuna": len(rows) + 1, "drawn": bool(is_drawn), "area_px": int(g.area), "y": cy, "x": cx, "angle_deg": a,
                          "quarter": int(quarter_of(a)), "r_norm": float(rn[m].mean()),
                          "r_norm_inner": float(rn[m].min()), "r_norm_outer": float(rn[m].max())})
         table = pd.DataFrame(rows) if rows else empty.copy()
     else:
-        table, n_over = empty.copy(), 0
+        table, n_over, n_drawn = empty.copy(), 0, 0
     table.attrs["n_overridden"] = n_over
+    table.attrs["n_drawn"] = n_drawn
     tot = np.bincount(bins[ctx], minlength=n_bins)
     hole = np.bincount(bins[ctx & (lab > 0)], minlength=n_bins)
     prof = pd.DataFrame({"bin": np.arange(1, n_bins + 1), "x": (np.arange(n_bins) + 0.5) / n_bins,
@@ -748,6 +764,7 @@ def lacuna_traits(table, n_gaps: int, cortex_area_kept_px) -> dict:
     area = int(table.area_px.sum()) if len(table) else 0
     return {"n_lacunae": len(table), "lacuna_area_px": area, "n_gaps_missed_cell": n_gaps,
             "n_lacunae_overridden": int(table.attrs.get("n_overridden", 0)),
+            "n_lacunae_drawn": int(table.attrs.get("n_drawn", 0)),
             "aerenchyma_share": area / cortex_area_kept_px if cortex_area_kept_px else np.nan,
             "lacuna_r_norm_mean": float(np.average(table.r_norm, weights=table.area_px)) if len(table) else np.nan}
 
@@ -772,12 +789,25 @@ def not_lacuna_arrays(marks) -> dict:
     return {"not_lacuna": np.asarray(marks, float).reshape(-1, 2)}
 
 
-def lacuna_edit(cells, region, mx, props, centre, arcs, marks, pts, remove=False):
+def load_drawn_lacuna(npz_path) -> list:
+    """The reviewer's "this is a lacuna" points [(y, x)], one per drawn lacuna (none in older files)."""
+    z = np.load(npz_path, allow_pickle=False)
+    return [tuple(map(float, p)) for p in z["lacuna_drawn"]] if "lacuna_drawn" in z else []
+
+
+def drawn_lacuna_arrays(drawn) -> dict:
+    return {"lacuna_drawn": np.asarray(drawn, float).reshape(-1, 2)}
+
+
+def lacuna_edit(cells, region, mx, props, centre, arcs, marks, pts, remove=False, drawn=None):
     """Aerenchyma edits, shared by the desktop editor and the web page. Returns (new marks, note); cells in place.
     Drawn outline: "this is a lacuna": cells inside it, outside the stele, are cleared (fake cells Cellpose drew over
     a hole), and marks inside it go; the usual rule then counts it (>= LACUNA_MIN_CELLS median cells, clear of the
     stele and the root edge). Cmd/Ctrl-click on an orange lacuna: "not a lacuna" (a mark, kept in the npz, counted
-    as n_lacunae_overridden). Click on a grey (overridden) one: it counts again."""
+    as n_lacunae_overridden). Click on a grey (overridden) one: it counts again.
+    drawn (a list, changed in place; None = the old behaviour): a drawn outline adds one point inside it, so the
+    lacuna counts whatever the automatic rules say (n_lacunae_drawn); a Cmd/Ctrl-click on a drawn lacuna drops its
+    points as well as marking it."""
     pts = np.asarray(pts, float)
     marks = list(marks)
     if len(pts) > 2:
@@ -792,12 +822,23 @@ def lacuna_edit(cells, region, mx, props, centre, arcs, marks, pts, remove=False
             if (cells == l).sum() < 0.25 * before:
                 cells[cells == l] = 0
         marks = [p for p in marks if not m[int(round(p[0])), int(round(p[1]))]]
-        return marks, ("Counted as a lacuna if it is at least %g median cortical cells and touches neither the stele "
-                       "nor the root edge." % LACUNA_MIN_CELLS)
+        if drawn is None:
+            return marks, ("Counted as a lacuna if it is at least %g median cortical cells and touches neither the "
+                           "stele nor the root edge." % LACUNA_MIN_CELLS)
+        hole = m & (cells == 0) & (mx == 0)
+        if not hole.any():
+            return marks, "Nothing to make a lacuna there (vessels only)."
+        dist = ndi.distance_transform_edt(np.pad(hole, 1))[1:-1, 1:-1]
+        y, x = np.unravel_index(np.argmax(dist), dist.shape)     # the point deepest inside: on the lacuna whatever its shape
+        drawn[:] = [p for p in drawn if not m[int(round(p[0])), int(round(p[1]))]] + [(float(y), float(x))]
+        return marks, "Lacuna drawn: it counts (your call overrides the automatic size, edge and stele rules)."
     y, x = (int(round(v)) for v in pts[0])
-    lab = lacunae(cells, region, mx, props, centre, arcs, mask=True, not_lacuna=marks)[3]
+    lab = lacunae(cells, region, mx, props, centre, arcs, mask=True, not_lacuna=marks, drawn=drawn or ())[3]
     if remove:
         if lab[y, x] > 0:
+            if drawn is not None:                       # it was drawn: forget that too
+                k = lab[y, x]
+                drawn[:] = [p for p in drawn if lab[int(round(p[0])), int(round(p[1]))] != k]
             return marks + [(float(y), float(x))], "Marked: not a lacuna (shown grey; click it to count it again)."
         return marks, "Cmd/Ctrl-click inside an orange lacuna to mark it as not a lacuna."
     if lab[y, x] < 0:
