@@ -12,6 +12,7 @@ unchanged and a project can be copied out and opened in the desktop app. Data li
                             anatomy/  masks/*.npz, qc/, samples.xlsx, settings.json (written by run_batch)
                             results/  written by summarise
                             .cache/   display PNGs (safe to delete)
+                            .undo/    the last UNDO_STEPS versions of each image's npz before an edit (Undo)
 """
 from __future__ import annotations
 
@@ -324,6 +325,30 @@ def overlay_png(d: Path, rel: str, part: str) -> Path:
         rgba[edge(region == 2)] = OVERLAY["stele"]
     Image.fromarray(rgba, "RGBA").save(f, optimize=True)
     return f
+
+
+UNDO_STEPS = 30          # edits kept per image for Undo; older ones are dropped
+
+
+def _undo_dir(d: Path, npz: Path) -> Path:
+    return d / ".undo" / npz.stem
+
+
+def _save(d: Path, npz: Path, **changes) -> None:
+    """P.save_edit, keeping the npz as it was first so Undo can put it back (whole file: masks, arcs, marks, status)."""
+    u = _undo_dir(d, npz)
+    u.mkdir(parents=True, exist_ok=True)
+    old = sorted(u.glob("*.npz"))
+    n = int(old[-1].stem) + 1 if old else 1
+    shutil.copyfile(npz, u / f"{n:06d}.npz")
+    for f in old[:max(0, len(old) + 1 - UNDO_STEPS)]:
+        f.unlink(missing_ok=True)
+    P.save_edit(npz, **changes)
+
+
+def _undo_left(d: Path, npz: Path) -> int:
+    u = _undo_dir(d, npz)
+    return len(list(u.glob("*.npz"))) if u.exists() else 0
 
 
 # ---------------------------------------------------------------- routes
@@ -665,16 +690,16 @@ def edit(name: str, rel: str = Form(...), target: str = Form(...), points: str =
         if new == arcs:
             return {**traits(name, rel, u), "note": "Nothing changed (drag further round the stele)." if len(pts) > 1
                     else "No excluded arc there."}
-        P.save_edit(npz, **P.sector_arrays(new))
-        return {**traits(name, rel, u), "note": ""}
+        _save(d, npz, **P.sector_arrays(new))
+        return {**traits(name, rel, u), "note": "", "undo": _undo_left(d, npz)}
     if target == "Aerenchyma":                     # pipeline.lacuna_edit: draw = a lacuna; Cmd/Ctrl-click = not one
         cells, region, mx, _, centre, arcs, props, _ = _live(d, npz)
         cells = cells.copy()
         old = P.load_not_lacuna(npz)
         marks, note = P.lacuna_edit(cells, region, mx, props, centre, arcs, old, pts, remove)
         if marks != old or len(pts) > 2:
-            P.save_edit(npz, cells=cells, **P.not_lacuna_arrays(marks))
-        return {**traits(name, rel, u), "note": note}
+            _save(d, npz, cells=cells, **P.not_lacuna_arrays(marks))
+        return {**traits(name, rel, u), "note": note, "undo": _undo_left(d, npz)}
     cells, region, mx = cells.copy(), region.copy(), mx.copy()
     note = ""
     if len(pts) == 1:
@@ -688,8 +713,23 @@ def edit(name: str, rel: str = Form(...), target: str = Form(...), points: str =
         if m.sum() < 10:
             raise HTTPException(400, "That outline is too small.")
         P.outline_edit(cells, region, mx, target, m, remove)
-    P.save_edit(npz, cells=cells, region=region, mx=mx)
-    return {**traits(name, rel, u), "note": note}
+    _save(d, npz, cells=cells, region=region, mx=mx)
+    return {**traits(name, rel, u), "note": note, "undo": _undo_left(d, npz)}
+
+
+@app.post("/api/projects/{name}/undo")
+def undo(name: str, rel: str = Form(...), u: dict = Depends(user)):
+    """Puts back this image's npz as it was before its last edit (masks, excluded arcs, aerenchyma marks and status),
+    one edit per call, up to UNDO_STEPS back. Save + next and scale changes are not edits and are not undone."""
+    d = _project(u, name)
+    rel = _safe_rel(rel).as_posix()
+    npz = d / "anatomy" / "masks" / f"{RB.image_key(Path(rel))}.npz"
+    old = sorted(_undo_dir(d, npz).glob("*.npz")) if npz.exists() else []
+    if not old:
+        raise HTTPException(400, "Nothing to undo on this image.")
+    shutil.copyfile(old[-1], npz)                  # a fresh mtime: the display caches redraw
+    old[-1].unlink()
+    return {**traits(name, rel, u), "undo": len(old) - 1, "status": P.load_state(npz)[3]}
 
 
 @app.post("/api/projects/{name}/reviewed")
@@ -759,7 +799,7 @@ def download_all(name: str, u: dict = Depends(user)):
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
         for p in sorted(d.rglob("*")):
             rel = p.relative_to(d)
-            if p.is_file() and rel.parts[0] != ".cache" and "qc" not in rel.parts[:2]:
+            if p.is_file() and rel.parts[0] not in (".cache", ".undo") and "qc" not in rel.parts[:2]:
                 z.write(p, f"{d.name}/{rel.as_posix()}")
     tmp.close()
     return FileResponse(tmp.name, media_type="application/zip", filename=f"{d.name}_project.zip",

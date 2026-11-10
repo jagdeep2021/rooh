@@ -205,6 +205,7 @@
   <div class="keys"><b>Drag</b> draws · <b>click</b> adds · hold <b>⌘/Ctrl</b> to remove instead</div>
   <div class="row view"><span style="width:44px">Cells</span><input type="range" id="opCells" min="0" max="1" step="0.05" value="1" title="Cell outlines">
     <button id="fitBtn" title="Fit the image (F)">Fit</button></div>
+  <div class="row view"><button id="undoBtn" title="Undo the last edit on this image (⌘/Ctrl-Z), up to 30 back">↶ Undo</button></div>
   <div class="row view"><span style="width:44px">Masks</span><input type="range" id="opMasks" min="0" max="1" step="0.05" value="1" title="Root, stele, vessels, excluded sectors"><span style="width:36px"></span></div>
   <div class="row view"><button id="aerBtn" class="on" title="Show / hide the aerenchyma lacunae Make results counts (Shift-A)">Aerenchyma</button>
     <button id="filesBtn" title="Colour cells by cell file number, 1 (next to the stele, blue) to 15+ (red); same scale on every image (Shift-F)">Cell files</button></div>
@@ -586,6 +587,20 @@ async function applyEdit(pts, remove) {
   } catch (e) { $("editMsg").textContent = ""; showErr(e); }
   finally { S.saving = false; S.pen = null; draw(); }
 }
+async function undo() {                           // the server puts back this image's npz from before its last edit
+  const im = S.images[S.i];
+  if (!im || S.saving || im.status === "not measured") return;
+  S.saving = true; $("editMsg").textContent = "Undoing…";
+  try {
+    const r = await api(`/api/projects/${enc(S.project)}/undo`, form({ rel: im.image }));
+    im.status = r.status;
+    await show(S.i);
+    await refresh();
+    $("editMsg").textContent = r.undo ? `Undone (${r.undo} more to undo).` : "Undone (nothing more to undo).";
+  } catch (e) { $("editMsg").textContent = ""; showErr(e); }
+  finally { S.saving = false; draw(); }
+}
+$("undoBtn").onclick = undo;
 const editable = () => { const im = S.images[S.i]; return im && im.status !== "not measured" && !S.saving; };
 cv.addEventListener("wheel", e => {
   e.preventDefault();
@@ -680,6 +695,7 @@ $("fitBtn").onclick = () => { if (S.gray) { fit(); draw(); } };
 const KEYS = { 1: "Cell", 2: "Metaxylem", 3: "Stele", 4: "Sectors", 5: "Root", 6: "Aerenchyma" };
 addEventListener("keydown", e => {
   if (["INPUT", "SELECT"].includes(e.target.tagName)) return;
+  if ((e.key === "z" || e.key === "Z") && (e.metaKey || e.ctrlKey) && !e.shiftKey) { e.preventDefault(); undo(); return; }
   if (e.key === " ") { e.preventDefault(); S.space = true; cv.classList.add("pan"); }
   if (e.key === "ArrowRight" || e.key === ".") show(S.i + 1).catch(showErr);
   if (e.key === "ArrowLeft" || e.key === ",") show(S.i - 1).catch(showErr);
