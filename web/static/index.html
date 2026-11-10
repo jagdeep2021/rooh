@@ -700,10 +700,24 @@ addEventListener("keydown", e => {                // Ctrl/Cmd-Z = Undo, whatever
     e.preventDefault(); e.stopPropagation(); document.activeElement?.blur?.(); undo();
   }
 }, true);
+// Space held = move the image (drag), whatever has focus: before this, a focused button (a tool, Save + next) took the
+// Space as its own click and a focused slider or menu swallowed it. Only typing in a text or number box keeps Space.
+const typingIn = el => el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && !["range", "checkbox", "radio", "button", "submit", "file", "color"].includes(el.type)));
+addEventListener("keydown", e => {
+  if (e.code !== "Space" || typingIn(e.target)) return;
+  e.preventDefault(); e.stopPropagation();
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  S.space = true; cv.classList.add("pan");
+}, true);
+addEventListener("keyup", e => {
+  if (e.code !== "Space" || typingIn(e.target)) return;
+  e.preventDefault(); e.stopPropagation();                 // a button never gets the Space as a click
+  S.space = false; if (!S.pan) cv.classList.remove("pan");
+}, true);
+addEventListener("blur", () => { S.space = false; if (!S.pan) cv.classList.remove("pan"); });   // Space let go in another window
 addEventListener("keydown", e => {
   if ((e.metaKey || e.ctrlKey) && e.code === "KeyZ") return;
   if (["INPUT", "SELECT"].includes(e.target.tagName)) return;
-  if (e.key === " ") { e.preventDefault(); S.space = true; cv.classList.add("pan"); }
   if (e.key === "ArrowRight" || e.key === ".") show(S.i + 1).catch(showErr);
   if (e.key === "ArrowLeft" || e.key === ",") show(S.i - 1).catch(showErr);
   if (e.key === "S" && e.shiftKey) saveNext();
@@ -715,7 +729,6 @@ addEventListener("keydown", e => {
   if ((e.key === "f" || e.key === "F") && !e.shiftKey && S.gray) { fit(); draw(); }
   if (KEYS[e.key]) setTarget(KEYS[e.key]);
 });
-addEventListener("keyup", e => { if (e.key === " ") { S.space = false; if (!S.pan) cv.classList.remove("pan"); } });
 setTarget(S.target);
 
 // ---------------------------------------------------------------- people (admins)
