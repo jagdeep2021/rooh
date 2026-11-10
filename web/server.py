@@ -13,6 +13,7 @@ unchanged and a project can be copied out and opened in the desktop app. Data li
                             results/  written by summarise
                             .cache/   display PNGs (safe to delete)
                             .undo/    the last UNDO_STEPS versions of each image's npz before an edit (Undo)
+                            .redo/    versions an Undo took away (Redo); emptied by a new edit
 """
 from __future__ import annotations
 
@@ -328,28 +329,53 @@ def overlay_png(d: Path, rel: str, part: str) -> Path:
     return f
 
 
-UNDO_STEPS = 30          # edits kept per image for Undo; older ones are dropped
+UNDO_STEPS = 30          # edits kept per image for Undo (and Redo); older ones are dropped
 
 
-def _undo_dir(d: Path, npz: Path) -> Path:
-    return d / ".undo" / npz.stem
+def _undo_dir(d: Path, npz: Path, kind: str = "undo") -> Path:
+    return d / f".{kind}" / npz.stem
 
 
-def _save(d: Path, npz: Path, **changes) -> None:
-    """P.save_edit, keeping the npz as it was first so Undo can put it back (whole file: masks, arcs, marks, status)."""
-    u = _undo_dir(d, npz)
+def _push(d: Path, npz: Path, kind: str) -> None:
+    """Keep a copy of the npz as it is now on the undo or redo stack (whole file: masks, arcs, marks, status)."""
+    u = _undo_dir(d, npz, kind)
     u.mkdir(parents=True, exist_ok=True)
     old = sorted(u.glob("*.npz"))
     n = int(old[-1].stem) + 1 if old else 1
     shutil.copyfile(npz, u / f"{n:06d}.npz")
     for f in old[:max(0, len(old) + 1 - UNDO_STEPS)]:
         f.unlink(missing_ok=True)
+
+
+def _save(d: Path, npz: Path, **changes) -> None:
+    """P.save_edit, keeping the npz as it was first so Undo can put it back. A new edit ends the Redo chain."""
+    _push(d, npz, "undo")
+    shutil.rmtree(_undo_dir(d, npz, "redo"), ignore_errors=True)
     P.save_edit(npz, **changes)
 
 
-def _undo_left(d: Path, npz: Path) -> int:
-    u = _undo_dir(d, npz)
+def _left(d: Path, npz: Path, kind: str = "undo") -> int:
+    u = _undo_dir(d, npz, kind)
     return len(list(u.glob("*.npz"))) if u.exists() else 0
+
+
+_undo_left = _left
+
+
+def _step(name: str, rel: str, u: dict, kind: str) -> dict:
+    """Undo (kind "undo") or Redo ("redo") one edit on an image: the npz now goes on the other stack, the newest
+    one on this stack comes back."""
+    d = _project(u, name)
+    rel = _safe_rel(rel).as_posix()
+    npz = d / "anatomy" / "masks" / f"{RB.image_key(Path(rel))}.npz"
+    old = sorted(_undo_dir(d, npz, kind).glob("*.npz")) if npz.exists() else []
+    if not old:
+        raise HTTPException(400, f"Nothing to {kind} on this image.")
+    _push(d, npz, "redo" if kind == "undo" else "undo")
+    shutil.copyfile(old[-1], npz)                  # a fresh mtime: the display caches redraw
+    old[-1].unlink()
+    return {**traits(name, rel, u), "undo": _left(d, npz, "undo"), "redo": _left(d, npz, "redo"),
+            "status": P.load_state(npz)[3]}
 
 
 # ---------------------------------------------------------------- routes
@@ -724,15 +750,13 @@ def edit(name: str, rel: str = Form(...), target: str = Form(...), points: str =
 def undo(name: str, rel: str = Form(...), u: dict = Depends(user)):
     """Puts back this image's npz as it was before its last edit (masks, excluded arcs, aerenchyma marks and status),
     one edit per call, up to UNDO_STEPS back. Save + next and scale changes are not edits and are not undone."""
-    d = _project(u, name)
-    rel = _safe_rel(rel).as_posix()
-    npz = d / "anatomy" / "masks" / f"{RB.image_key(Path(rel))}.npz"
-    old = sorted(_undo_dir(d, npz).glob("*.npz")) if npz.exists() else []
-    if not old:
-        raise HTTPException(400, "Nothing to undo on this image.")
-    shutil.copyfile(old[-1], npz)                  # a fresh mtime: the display caches redraw
-    old[-1].unlink()
-    return {**traits(name, rel, u), "undo": len(old) - 1, "status": P.load_state(npz)[3]}
+    return _step(name, rel, u, "undo")
+
+
+@app.post("/api/projects/{name}/redo")
+def redo(name: str, rel: str = Form(...), u: dict = Depends(user)):
+    """Puts back the edit the last Undo took away. A new edit after an Undo ends the chain (nothing to redo)."""
+    return _step(name, rel, u, "redo")
 
 
 @app.post("/api/projects/{name}/reviewed")
@@ -802,7 +826,7 @@ def download_all(name: str, u: dict = Depends(user)):
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
         for p in sorted(d.rglob("*")):
             rel = p.relative_to(d)
-            if p.is_file() and rel.parts[0] not in (".cache", ".undo") and "qc" not in rel.parts[:2]:
+            if p.is_file() and rel.parts[0] not in (".cache", ".undo", ".redo") and "qc" not in rel.parts[:2]:
                 z.write(p, f"{d.name}/{rel.as_posix()}")
     tmp.close()
     return FileResponse(tmp.name, media_type="application/zip", filename=f"{d.name}_project.zip",
