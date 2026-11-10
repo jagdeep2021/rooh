@@ -219,7 +219,7 @@
   <div class="keys"><b>Drag</b> draws · <b>click</b> adds · hold <b>⌘/Ctrl</b> to remove instead</div>
   <div class="row view"><span style="width:44px">Cells</span><input type="range" id="opCells" min="0" max="1" step="0.05" value="1" title="Cell outlines">
     <button id="fitBtn" title="Fit the image (F)">Fit</button></div>
-  <div class="row view"><button id="undoBtn" title="Undo the last edit on this image (⌘/Ctrl-Z), up to 30 back">↶ Undo</button></div>
+  <div class="row view"><button id="undoBtn" title="Undo the last edit on this image (⌘/Ctrl-Z), up to 30 back">↶ Undo</button><button id="redoBtn" title="Redo what Undo took away (⌘⇧Z, or Ctrl-Y / Ctrl-Shift-Z)">↷ Redo</button></div>
   <div class="row view"><span style="width:44px">Masks</span><input type="range" id="opMasks" min="0" max="1" step="0.05" value="1" title="Root, stele, vessels, excluded sectors"><span style="width:36px"></span></div>
   <div class="row view"><button id="aerBtn" class="on" title="Show / hide the aerenchyma lacunae Make results counts (Shift-A)">Aerenchyma</button>
     <button id="filesBtn" title="Colour cells by cell file number, 1 (next to the stele, blue) to 15+ (red); same scale on every image (Shift-F)">Cell files</button></div>
@@ -622,22 +622,24 @@ async function applyEdit(pts, remove) {
   } catch (e) { $("editMsg").textContent = ""; showErr(e); }
   finally { S.saving = false; S.pen = null; draw(); }
 }
-async function undo() {                           // the server puts back this image's npz from before its last edit
-  while (S.saving) await new Promise(ok => setTimeout(ok, 100));   // pressed during a save: undo that edit once saved
+async function step(kind) {                       // undo / redo: the server swaps this image's npz with its stack
+  while (S.saving) await new Promise(ok => setTimeout(ok, 100));   // pressed during a save: act on that edit once saved
   S.pen = null;                                    // a half-drawn outline is dropped, not saved
   const im = S.images[S.i];
   if (!im || im.status === "not measured") return;
-  S.saving = true; $("editMsg").textContent = "Undoing…";
+  S.saving = true; $("editMsg").textContent = kind === "undo" ? "Undoing…" : "Redoing…";
   try {
-    const r = await api(`/api/projects/${enc(S.project)}/undo`, form({ rel: im.image }));
+    const r = await api(`/api/projects/${enc(S.project)}/${kind}`, form({ rel: im.image }));
     im.status = r.status;
     await show(S.i);
     await refresh();
-    $("editMsg").textContent = r.undo ? `Undone (${r.undo} more to undo).` : "Undone (nothing more to undo).";
+    $("editMsg").textContent = `${kind === "undo" ? "Undone" : "Redone"} (${r.undo} to undo, ${r.redo} to redo).`;
   } catch (e) { $("editMsg").textContent = ""; showErr(e); }
   finally { S.saving = false; draw(); }
 }
+const undo = () => step("undo"), redo = () => step("redo");
 $("undoBtn").onclick = undo;
+$("redoBtn").onclick = redo;
 const editable = () => { const im = S.images[S.i]; return im && im.status !== "not measured" && !S.saving; };
 cv.addEventListener("wheel", e => {
   e.preventDefault();
@@ -731,8 +733,10 @@ $("filesBtn").onclick = toggleFiles;
 $("fitBtn").onclick = () => { if (S.gray) { fit(); draw(); } };
 const KEYS = { 1: "Cell", 2: "Metaxylem", 3: "Stele", 4: "Sectors", 5: "Root", 6: "Aerenchyma" };
 addEventListener("keydown", e => {                // Ctrl/Cmd-Z = Undo, whatever has focus and whichever tool is on
-  if ((e.code === "KeyZ" || e.key.toLowerCase() === "z") && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
-    e.preventDefault(); e.stopPropagation(); document.activeElement?.blur?.(); undo();
+  const z = e.code === "KeyZ" || e.key.toLowerCase() === "z", yk = e.code === "KeyY" || e.key.toLowerCase() === "y";
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && (z || (yk && e.ctrlKey && !e.shiftKey))) {
+    e.preventDefault(); e.stopPropagation(); document.activeElement?.blur?.();
+    (z && !e.shiftKey) ? undo() : redo();          // ⌘Z / Ctrl-Z undo; ⌘⇧Z, Ctrl-Shift-Z, Ctrl-Y redo
   }
 }, true);
 // Space held = move the image (drag), whatever has focus: before this, a focused button (a tool, Save + next) took the
@@ -751,7 +755,7 @@ addEventListener("keyup", e => {
 }, true);
 addEventListener("blur", () => { S.space = false; if (!S.pan) cv.classList.remove("pan"); });   // Space let go in another window
 addEventListener("keydown", e => {
-  if ((e.metaKey || e.ctrlKey) && e.code === "KeyZ") return;
+  if ((e.metaKey || e.ctrlKey) && (e.code === "KeyZ" || e.code === "KeyY")) return;
   if (["INPUT", "SELECT"].includes(e.target.tagName)) return;
   if (e.key === "ArrowRight" || e.key === ".") show(S.i + 1).catch(showErr);
   if (e.key === "ArrowLeft" || e.key === ",") show(S.i - 1).catch(showErr);
