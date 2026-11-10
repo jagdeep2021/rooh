@@ -85,6 +85,13 @@
   main .rulerpop input { width:64px; }
   main .hint { position:absolute; left:10px; bottom:10px; right:10px; color:#ccc; font-size:12px; pointer-events:none; }
   main .hint span { background:rgba(0,0,0,.7); padding:3px 8px; border-radius:4px; }
+  main .zoombar { position:absolute; z-index:4; right:10px; top:50%; transform:translateY(-50%); display:flex; flex-direction:column;
+                  align-items:center; gap:6px; padding:8px 5px; background:rgba(20,20,20,.78); border:1px solid #444; border-radius:8px; }
+  main .zoombar[hidden] { display:none; }
+  main .zoombar button { width:28px; height:26px; padding:0; font-size:16px; line-height:1; color:#eee; background:#2a2a2a; border:1px solid #555; border-radius:5px; }
+  main .zoombar #zoomFit { font-size:11px; height:22px; }
+  main .zoombar input { writing-mode:vertical-lr; direction:rtl; width:22px; height:180px; margin:0; accent-color:#ddd; }
+  main .zoombar span { color:#ddd; font-size:11px; font-variant-numeric:tabular-nums; }
   main .empty { position:absolute; inset:0; display:grid; place-items:center; color:#999; padding:24px; text-align:center; }
 
   /* right: edit, then this image's graphs */
@@ -182,6 +189,13 @@
 
 <main id="view">
   <canvas id="cv"></canvas>
+  <div class="zoombar" id="zoomBar" hidden title="Zoom: drag the bar (the mouse wheel does the same)">
+    <button type="button" id="zoomIn" title="Zoom in">+</button>
+    <input type="range" id="zoom" min="-1" max="5.4" step="0.01" value="0" aria-label="Zoom">
+    <button type="button" id="zoomOut" title="Zoom out">−</button>
+    <span id="zoomTxt">1×</span>
+    <button type="button" id="zoomFit" title="Fit the image (F)">Fit</button>
+  </div>
   <div id="rulerBox" class="rulerpop" hidden>Scale bar <b id="rulerPx"></b> =
     <input type="number" id="rulerUm" min="0" step="any" value="100" title="The scale bar's length in µm"> µm
     <button id="rulerSet">Set</button><button id="rulerX" title="Cancel (Esc)">✕</button></div>
@@ -207,7 +221,6 @@
     <button id="fitBtn" title="Fit the image (F)">Fit</button></div>
   <div class="row view"><button id="undoBtn" title="Undo the last edit on this image (⌘/Ctrl-Z), up to 30 back">↶ Undo</button></div>
   <div class="row view"><span style="width:44px">Masks</span><input type="range" id="opMasks" min="0" max="1" step="0.05" value="1" title="Root, stele, vessels, excluded sectors"><span style="width:36px"></span></div>
-  <div class="row view"><span style="width:44px">Zoom</span><input type="range" id="zoom" min="-1" max="5.4" step="0.01" value="0" title="Drag to zoom in or out (the mouse wheel does the same; Fit or F resets)"><span id="zoomTxt" style="width:36px;font-variant-numeric:tabular-nums">1×</span></div>
   <div class="row view"><button id="aerBtn" class="on" title="Show / hide the aerenchyma lacunae Make results counts (Shift-A)">Aerenchyma</button>
     <button id="filesBtn" title="Colour cells by cell file number, 1 (next to the stele, blue) to 15+ (red); same scale on every image (Shift-F)">Cell files</button></div>
   <div class="msg" id="editMsg"></div>
@@ -477,12 +490,17 @@ function zoomTo(z) {                              // zoom slider: z = times the 
   S.view.x = cx - (cx - S.view.x) * f; S.view.y = cy - (cy - S.view.y) * f; S.view.s *= f; draw();
 }
 function syncZoom() {                             // the slider follows the wheel, Fit and image changes
+  $("zoomBar").hidden = !S.gray || !S.view;
   if (!S.gray || !S.view) return;
   const z = S.view.s / fitScale();
   if (document.activeElement !== $("zoom")) $("zoom").value = Math.log2(z);
   $("zoomTxt").textContent = (z < 10 ? z.toFixed(1) : Math.round(z)) + "×";
 }
 $("zoom").oninput = e => zoomTo(2 ** +e.target.value);
+const zoomStep = k => { if (S.gray && S.view) zoomTo(Math.min(2 ** 5.4, Math.max(0.5, S.view.s / fitScale() * k))); };
+$("zoomIn").onclick = e => { zoomStep(1.5); e.currentTarget.blur(); };
+$("zoomOut").onclick = e => { zoomStep(1 / 1.5); e.currentTarget.blur(); };
+$("zoomFit").onclick = e => { if (S.gray) { fit(); draw(); } e.currentTarget.blur(); };
 for (const id of ["zoom", "opCells", "opMasks"])   // let go of a slider: keys (F, 1-6, arrows) go back to the image
   $(id).addEventListener("change", e => e.target.blur());
 function fit() {
