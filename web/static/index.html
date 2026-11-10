@@ -694,8 +694,9 @@ $("filesBtn").onclick = toggleFiles;
 $("fitBtn").onclick = () => { if (S.gray) { fit(); draw(); } };
 const KEYS = { 1: "Cell", 2: "Metaxylem", 3: "Stele", 4: "Sectors", 5: "Root", 6: "Aerenchyma" };
 addEventListener("keydown", e => {
+  const typing = e.target.tagName === "TEXTAREA" || (e.target.tagName === "INPUT" && !["range", "checkbox", "button", "file"].includes(e.target.type));
+  if ((e.key === "z" || e.key === "Z") && (e.metaKey || e.ctrlKey) && !e.shiftKey && !typing) { e.preventDefault(); e.target.blur?.(); undo(); return; }
   if (["INPUT", "SELECT"].includes(e.target.tagName)) return;
-  if ((e.key === "z" || e.key === "Z") && (e.metaKey || e.ctrlKey) && !e.shiftKey) { e.preventDefault(); undo(); return; }
   if (e.key === " ") { e.preventDefault(); S.space = true; cv.classList.add("pan"); }
   if (e.key === "ArrowRight" || e.key === ".") show(S.i + 1).catch(showErr);
   if (e.key === "ArrowLeft" || e.key === ",") show(S.i - 1).catch(showErr);
