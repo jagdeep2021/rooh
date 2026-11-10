@@ -588,8 +588,10 @@ async function applyEdit(pts, remove) {
   finally { S.saving = false; S.pen = null; draw(); }
 }
 async function undo() {                           // the server puts back this image's npz from before its last edit
+  while (S.saving) await new Promise(ok => setTimeout(ok, 100));   // pressed during a save: undo that edit once saved
+  S.pen = null;                                    // a half-drawn outline is dropped, not saved
   const im = S.images[S.i];
-  if (!im || S.saving || im.status === "not measured") return;
+  if (!im || im.status === "not measured") return;
   S.saving = true; $("editMsg").textContent = "Undoing…";
   try {
     const r = await api(`/api/projects/${enc(S.project)}/undo`, form({ rel: im.image }));
@@ -693,9 +695,13 @@ function toggleFiles() { S.showFiles = !S.showFiles; $("filesBtn").classList.tog
 $("filesBtn").onclick = toggleFiles;
 $("fitBtn").onclick = () => { if (S.gray) { fit(); draw(); } };
 const KEYS = { 1: "Cell", 2: "Metaxylem", 3: "Stele", 4: "Sectors", 5: "Root", 6: "Aerenchyma" };
+addEventListener("keydown", e => {                // Ctrl/Cmd-Z = Undo, whatever has focus and whichever tool is on
+  if ((e.code === "KeyZ" || e.key.toLowerCase() === "z") && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+    e.preventDefault(); e.stopPropagation(); document.activeElement?.blur?.(); undo();
+  }
+}, true);
 addEventListener("keydown", e => {
-  const typing = e.target.tagName === "TEXTAREA" || (e.target.tagName === "INPUT" && !["range", "checkbox", "button", "file"].includes(e.target.type));
-  if ((e.key === "z" || e.key === "Z") && (e.metaKey || e.ctrlKey) && !e.shiftKey && !typing) { e.preventDefault(); e.target.blur?.(); undo(); return; }
+  if ((e.metaKey || e.ctrlKey) && e.code === "KeyZ") return;
   if (["INPUT", "SELECT"].includes(e.target.tagName)) return;
   if (e.key === " ") { e.preventDefault(); S.space = true; cv.classList.add("pan"); }
   if (e.key === "ArrowRight" || e.key === ".") show(S.i + 1).catch(showErr);
