@@ -242,6 +242,16 @@ Everything else is derived by `derive()`, so the editor and the summary always a
 
 Why the measurements are defined the way they are, and how they differ from earlier lab pipelines: [docs/development/](docs/development/README.md).
 
+Two test suites, both on synthetic sections with known answers; run both before a pull request that touches them:
+
+- `tests/check_numbers.py`: every measurement and output file (~1 min).
+- `tests/check_app.py [out_dir] [--no-cellpose]`: the whole app in a headless browser, website and desktop.
+  It starts its own servers on a scratch folder, so it never touches real projects or `~/.rooh`. Every button,
+  shortcut and server route is used at least once and checked on disk (zoom, pan, every edit tool, undo/redo,
+  scale ruler, upload, Outline, Make results, download, delete, invite/approve/remove). It fails if a new control
+  or route is never used. About 2.5 min with Cellpose, 2 without. Setup once:
+  `.venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m playwright install chromium-headless-shell`.
+
 ## Status (2026-11-02)
 
 - Auto pass run on all 71 SL-2026-004 images (~15–40 s each on M-series MPS).

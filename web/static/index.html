@@ -368,8 +368,8 @@ async function upload(files) {
   const worker = async () => { while (next < batches.length) { const i = next++; await send(batches[i], i); sent[i] = batches[i].reduce((a, x) => a + x.size, 0); tell(); } };
   tell();
   await Promise.all([worker(), worker(), worker()]);
+  await refresh();                               // first: refresh() rewrites the job line
   $("jobMsg").textContent = `${imgs.length} image(s) added (${mb(total)} MB in ${Math.round((Date.now() - t0) / 1000)} s). Next: Outline new.`;
-  await refresh();
 }
 $("upDir").onchange = e => upload(e.target.files).catch(showErr);
 $("upFiles").onchange = e => upload(e.target.files).catch(showErr);
@@ -421,15 +421,17 @@ async function show(k) {
   if (k < 0 || k >= S.images.length) return;
   mark(k);
   const im = S.images[k], q = `?rel=${enc(im.image)}&t=${Date.now()}`, base = `/api/projects/${enc(S.project)}`;
-  const gone = () => base !== `/api/projects/${enc(S.project)}`;   // project switched or deleted meanwhile
+  const tok = S.showTok = (S.showTok || 0) + 1;   // a newer show() (fast arrows) wins; this one then draws nothing
+  const gone = () => tok !== S.showTok || base !== `/api/projects/${enc(S.project)}`;   // or the project changed
   $("imgName").textContent = `${im.image} · ${im.status}`;
   $("scale").value = im.um_per_px ?? "";
   $("empty").hidden = true;
-  const fresh = !S.gray;
-  S.gray = await load(`${base}/image/gray${q}`);
   const out = im.status === "not measured";
-  [S.ovC, S.ovM, S.ovL, S.ovF] = await Promise.all(["cells", "masks", "lacunae", "files"].map(k => out ? null : load(`${base}/image/${k}${q}`).catch(() => null)));
+  const [gray, ...ov] = await Promise.all([load(`${base}/image/gray${q}`),
+    ...["cells", "masks", "lacunae", "files"].map(k => out ? null : load(`${base}/image/${k}${q}`).catch(() => null))]);
   if (gone()) return;
+  const fresh = !S.gray;
+  S.gray = gray; [S.ovC, S.ovM, S.ovL, S.ovF] = ov;
   if (fresh || k !== S.shown) fit();               // a new image opens fitted; an edit keeps the zoom
   S.shown = k;
   S.sectors = null;
@@ -724,7 +726,19 @@ cv.addEventListener("pointerup", () => {
   else S.pen = null;
 });
 cv.addEventListener("contextmenu", e => e.preventDefault());   // Ctrl-click on a Mac must not open a menu
-new ResizeObserver(() => { if (S.gray) fit(); draw(); }).observe(cv);   // the image area changed size: refit
+let lastBox = null;                               // the image area changed size (window, a message wrapping, the panel
+new ResizeObserver(() => {                        // loading): keep the zoom and the point at the centre, don't refit
+  const r = cv.getBoundingClientRect();
+  if (!r.width || !r.height) return;              // hidden for a moment: keep everything as it was
+  if (S.gray && S.view && lastBox) {
+    const z = S.view.s / (Math.min(lastBox.width / S.gray.width, lastBox.height / S.gray.height) * 0.96);
+    const ix = (lastBox.width / 2 - S.view.x) / S.view.s, iy = (lastBox.height / 2 - S.view.y) / S.view.s;
+    const s = fitScale() * z;
+    S.view = { s, x: r.width / 2 - ix * s, y: r.height / 2 - iy * s };
+  } else if (S.gray) fit();
+  lastBox = { width: r.width, height: r.height };
+  draw();
+}).observe(cv);
 $("opCells").oninput = $("opMasks").oninput = draw;
 function toggleAer() { S.showAer = !S.showAer; $("aerBtn").classList.toggle("on", S.showAer); draw(); }
 $("aerBtn").onclick = toggleAer;
