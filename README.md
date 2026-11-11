@@ -10,7 +10,8 @@ cross_section_anatomy/
 ├── pipeline.py     propose() auto pass, derive() tissues/layers/areas, click edits, storage
 ├── run_batch.py    folder of images -> anatomy/masks/*.npz + anatomy/qc/*.png (resumable)
 ├── review.py       napari app: fix cells / stele / metaxylem / root; exclude damaged sectors
-├── summarise.py    masks -> results/{cortex_pattern, all_cells, anatomy_summary}_YYYY-MM-DD.xlsx
+├── summarise.py    masks -> results/{traits, cortex_pattern, all_cells, anatomy_summary}_YYYY-MM-DD.xlsx
+│                   traits = the short file: per image + per quarter, µm, every column explained;
 │                   + results/methods_YYYY-MM-DD.txt + results/figures/ (cortex pattern per species, per image)
 │                   anatomy_summary opens on START_HERE (files, unit = plant, what to check, where each answer is);
 │                   every workbook: README (each column: topic, unit, meaning) + run_info (Rooh commit, thresholds)

@@ -37,6 +37,55 @@ explains how they came about.
 
 ---
 
+## The traits file (`traits_DATE.xlsx`, since 2026-11-10)
+
+The short overall file: **per image and per quarter only**, never per plant (the user joins plant, treatment and
+anything else on `image_file` later). Sizes in µm; blank without a scale (the full record in `anatomy_summary` keeps
+pixels). Every row carries `image_file` and the grouping columns from `samples.xlsx`. Every image measured and not
+set to `include = no` is in it; `START_HERE` in `anatomy_summary` lists any image left out and why.
+
+**Rules.** A quarter (Q1 = 0–90°, then counter-clockwise, around the centre) with < 45° kept is blank. Shares,
+medians, widths and `ccfn` use the kept angles from 45° up; **absolute areas and counts per quarter only when all 90°
+are kept**. Nothing per quarter is estimated. Per-image cortex traits = the mean of the quarters that pass.
+
+**Sheet `Per image`**
+
+| Column | How |
+|---|---|
+| `angle_kept_deg`, `excluded_sectors` | As in `per_image`. |
+| `root_area_um2` | Pixels inside the root outline as drawn (where an arc is excluded the outline may follow the damage). |
+| `root_area_est_um2` | **Fill the edge**: kept angles counted pixel by pixel; across each excluded arc the root radius (from the centre, 0.25° steps) is interpolated linearly between the kept radii on either side, and the wedge adds ½ (r + 0.5)² Δθ. Equals `root_area_um2` when nothing is excluded. Blank under 180° kept. (Tested against scaling by angle: `docs/development/area_estimate.py`.) |
+| `root_diameter_um` | 2√(`root_area_est` / π). |
+| `stele_area_um2` | Whole section. |
+| `cortex_area_kept_um2` | Root outside the stele, kept angles only: measured. |
+| `cortex_area_est_um2` | `root_area_est` − stele. |
+| `stele_share` | stele / `root_area_est`. |
+| `cortex_stele_ratio` | `cortex_area_est` / stele. |
+| `mx_n`, `mx_area_mean_um2`, `mx_area_median_um2`, `mx_area_max_um2`, `mx_area_total_um2` | Metaxylem vessels, whole section: count and per-vessel area statistics. |
+| `axial_conductance_m4_MPa_s` | Hagen–Poiseuille, π Σ r⁴ / (8 η): r from each vessel's area (equivalent circle), η = water at 20 °C (1.002 mPa s); m⁴ MPa⁻¹ s⁻¹ (Tyree & Zimmermann 2002). A theoretical maximum: no end walls, pits or lumen shape. |
+| `n_quarters_used` | Quarters with ≥ 45° kept. |
+| `ccfn`, `cortex_width_um`, `median_cortex_cell_area_um2`, `aerenchyma_share` | Mean of the quarter values (below). |
+
+**Sheet `Per quarter`**
+
+| Column | How |
+|---|---|
+| `quarter`, `kept_deg` | Q1–Q4 and its kept degrees. |
+| `ccfn` | **Gap-aware CCFN**: on each 5° ray (as `n_cortical_layers`), the file number of the outermost cortical cell, where a gap **between cortical cells** on the ray (lacuna, missed cell) counts as the cells it would hold, round(gap / the neighbouring cells' length on the ray) (the `cell_files` rule). Unlike `cell_files`, a gap between the stele edge and the first cell is not counted: on the shipped examples it came from stele outlines drawn too small or cortex pulled away, never lost cells. Median over the quarter's kept rays. |
+| `ccfn_cells_present` | The same rays counting only the cells present (the `n_cortical_layers` rule). `ccfn` = this + the files in gaps; far above it with no aerenchyma = cells Cellpose missed. |
+| `n_rays` | Rays behind `ccfn`. |
+| `cortex_width_um` | Mean (root radius − stele radius) over the quarter's kept degrees. |
+| `median_cortex_cell_area_um2` | Median area of the kept cortical cells (centre in the quarter). |
+| `aerenchyma_share` | Lacuna pixels / root-outside-stele pixels, kept angles of the quarter. |
+| `cortex_area_um2`, `lacuna_area_um2` | Root-outside-stele and lacuna pixels in the quarter; whole quarter kept only. |
+| `n_lacunae`, `n_lacunae_drawn` | Lacunae with their centre in the quarter, and how many of them were drawn by hand; whole quarter kept only. |
+
+**Sheets `Cell area by file` / `Cells per file`**: one row per image; `file_1` … `file_N` = mean cell area (µm²) and
+cell count per cell file (file 1 next to the stele; cortex + epidermis, the pattern tissue, so the outermost files
+hold the epidermis). File = the median of a cell's gap-aware numbers on rays every 0.5° (`cell_files`).
+
+---
+
 ## 1. Identity
 
 | Column | Meaning |

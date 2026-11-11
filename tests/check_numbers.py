@@ -529,6 +529,172 @@ def run(out_dir: Path):
     edit("13_lateral_root_inside_outline", e13, {"n_cortex_cells": 288},
          "shows what happens if the outline takes in the lateral root")
 
+    traits_checks(out_dir, base, gray)
+
+
+def traits(d: Path) -> dict:
+    """The sheets of traits_DATE.xlsx (after results(d) or SUM.main)."""
+    x = next((d / "results").glob("traits_*.xlsx"))
+    return {k: pd.read_excel(x, sheet_name=k) for k in ("README", "Per image", "Per quarter", "Cell area by file",
+                                                        "Cells per file")}
+
+
+def traits_checks(out_dir: Path, base: Path, gray):
+    """traits_DATE.xlsx (2026-11-10): per image + per quarter, µm, nothing per plant."""
+    A = UM ** 2
+    t = traits(base)
+    i = t["Per image"].set_index("image_file").loc["S.tif"]
+    q = t["Per quarter"][t["Per quarter"].image_file == "S.tif"].set_index("quarter")
+    ck = lambda what, got, want, tol=0.0, note="": check("T1_traits_base", what, got, want, tol, note)
+    ck("root_area_um2 = pi R^2", float(i.root_area_um2), np.pi * R_ROOT ** 2 * A, .005)
+    ck("nothing excluded: root_area_est = root_area", float(i.root_area_est_um2), float(i.root_area_um2), 1e-9)
+    ck("root_diameter_um = 2 R", float(i.root_diameter_um), 2 * R_ROOT * UM, .005)
+    ck("stele_area_um2", float(i.stele_area_um2), np.pi * R_STELE ** 2 * A, .01)
+    ck("stele_share = (Rs/R)^2", float(i.stele_share), (R_STELE / R_ROOT) ** 2, .01)
+    ck("cortex_stele_ratio", float(i.cortex_stele_ratio), (R_ROOT ** 2 - R_STELE ** 2) / R_STELE ** 2, .01)
+    ck("mx_n", int(i.mx_n), 6)
+    for k in ("mean", "median", "max"):
+        ck(f"mx_area_{k}_um2 = pi r^2", float(i[f"mx_area_{k}_um2"]), np.pi * MX_R ** 2 * A, .04)
+    ck("mx_area_total_um2", float(i.mx_area_total_um2), 6 * np.pi * MX_R ** 2 * A, .04)
+    r_m = MX_R * UM * 1e-6
+    ck("axial conductance = 6 pi r^4 / 8 eta", float(i.axial_conductance_m4_MPa_s),
+       6 * np.pi * r_m ** 4 / (8 * P.WATER_VISCOSITY_MPA_S), .08, "r^4: 2% in area = 4% here")
+    ck("n_quarters_used", int(i.n_quarters_used), 4)
+    ck("ccfn (mean of quarters)", float(i.ccfn), 8.0)
+    ck("cortex_width_um", float(i.cortex_width_um), (R_ROOT - R_STELE) * UM, .01)
+    ck("aerenchyma_share", float(i.aerenchyma_share), 0.0)
+    ck("4 quarter rows", len(q), 4)
+    ck("quarter cortex areas sum to the cortex", float(q.cortex_area_um2.sum()),
+       np.pi * (R_ROOT ** 2 - R_STELE ** 2) * A, .005)
+    ck("each quarter ccfn 8", ",".join(str(int(v)) for v in q.ccfn), "8,8,8,8")
+    ck("each quarter: 18 rays", ",".join(str(int(v)) for v in q.n_rays), "18,18,18,18")
+    fa = t["Cell area by file"].set_index("image_file").loc["S.tif"]
+    for k in range(8):
+        ck(f"cell area file {k + 1} = layer {k + 1}", float(fa[f"file_{k + 1}"]), CELL_AREA[k] * A, .03)
+    ck("file 9 = epidermis", float(fa["file_9"]), EPI_AREA * A, .03)
+    fn = t["Cells per file"].set_index("image_file").loc["S.tif"]
+    ck("cells per file 1-8 = 36, file 9 = 72", ",".join(str(int(fn[f"file_{k}"])) for k in range(1, 10)),
+       "36,36,36,36,36,36,36,36,72")
+    ck("no plant column (per image only)", "plant" in t["Per image"].columns, False)
+    rd = t["README"]
+    cols = {(s, c) for s in ("Per image", "Per quarter") for c in t[s].columns}
+    blank = [c for s, c in cols if rd[(rd.sheet == s) & (rd.column == c)]["what it is"].fillna("").eq("").all()]
+    ck("README: every column described", ", ".join(blank) or "none", "none")
+    tr = (HERE / "docs/traits.md").read_text()
+    miss = sorted({c for _, c in cols if f"`{c}`" not in tr} - {"image_file", "status", "um_per_px"})
+    ck("every traits column is in docs/traits.md", ", ".join(miss) or "none missing", "none missing")
+
+    def tedit(case, fn):
+        d = out_dir / case
+        shutil.copytree(base, d)
+        shutil.rmtree(d / "results", ignore_errors=True)
+        npz = d / "anatomy/masks/S.npz"
+        c, rg, m, _ = P.load_state(npz)
+        fn(npz, c.copy(), rg.copy(), m.copy())
+        SUM.main(d / "anatomy")
+        t = traits(d)
+        return (t["Per image"].set_index("image_file").loc["S.tif"],
+                t["Per quarter"][t["Per quarter"].image_file == "S.tif"].set_index("quarter"))
+
+    # T2: the edge torn in over 180-240 (outline follows the tear, r 350) and that arc excluded: fill-the-edge brings
+    # back the circle; the measured outline area is smaller; cortex kept from the kept angles only
+    def t2(npz, c, rg, m):
+        rg[(TH >= 180) & (TH < 240) & (RR >= 350)] = 0
+        P.save_edit(npz, region=rg, **P.sector_arrays([(180, 240, "torn")]))
+    i, q = tedit("T2_torn_edge_filled", t2)
+    torn = np.pi * R_ROOT ** 2 - (60 / 360) * np.pi * (R_ROOT ** 2 - 350 ** 2)
+    check("T2_torn_edge_filled", "root_area_um2 = the torn outline", float(i.root_area_um2), torn * A, .005)
+    check("T2_torn_edge_filled", "root_area_est_um2 = the whole circle", float(i.root_area_est_um2),
+          np.pi * R_ROOT ** 2 * A, .005)
+    check("T2_torn_edge_filled", "root_diameter_um = 2 R", float(i.root_diameter_um), 2 * R_ROOT * UM, .005)
+    check("T2_torn_edge_filled", "cortex_area_est = circle - stele", float(i.cortex_area_est_um2),
+          np.pi * (R_ROOT ** 2 - R_STELE ** 2) * A, .005)
+    check("T2_torn_edge_filled", "cortex_area_kept = 300 deg of the annulus", float(i.cortex_area_kept_um2),
+          300 / 360 * np.pi * (R_ROOT ** 2 - R_STELE ** 2) * A, .005)
+    check("T2_torn_edge_filled", "Q3 (30 deg kept): blank", bool(pd.isna(q.loc["Q3", "ccfn"])), True)
+    check("T2_torn_edge_filled", "Q3 kept_deg", float(q.loc["Q3", "kept_deg"]), 30.0)
+    check("T2_torn_edge_filled", "n_quarters_used", int(i.n_quarters_used), 3)
+
+    # T3: under 180 deg kept: no estimate (too little edge to interpolate), the measured area stays
+    i, q = tedit("T3_little_kept", lambda npz, c, rg, m: P.save_edit(npz, **P.sector_arrays([(0, 200, "torn")])))
+    check("T3_little_kept", "root_area_est blank under 180 deg", bool(pd.isna(i.root_area_est_um2)), True)
+    check("T3_little_kept", "root_area_um2 still measured", float(i.root_area_um2), np.pi * R_ROOT ** 2 * A, .005)
+    check("T3_little_kept", "stele still measured", float(i.stele_area_um2), np.pi * R_STELE ** 2 * A, .01)
+
+    # T4: a quarter partly kept (Q1, 0-30 excluded -> 60 deg): shares, widths, ccfn yes; areas and counts blank
+    i, q = tedit("T4_partial_quarter", lambda npz, c, rg, m: P.save_edit(npz, **P.sector_arrays([(0, 30, "debris")])))
+    check("T4_partial_quarter", "Q1 kept 60", float(q.loc["Q1", "kept_deg"]), 60.0)
+    check("T4_partial_quarter", "Q1 ccfn 8", float(q.loc["Q1", "ccfn"]), 8.0)
+    check("T4_partial_quarter", "Q1 cortex width", float(q.loc["Q1", "cortex_width_um"]), (R_ROOT - R_STELE) * UM, .01)
+    check("T4_partial_quarter", "Q1 aerenchyma_share 0", float(q.loc["Q1", "aerenchyma_share"]), 0.0)
+    check("T4_partial_quarter", "Q1 cortex_area blank (not 90 deg)", bool(pd.isna(q.loc["Q1", "cortex_area_um2"])), True)
+    check("T4_partial_quarter", "Q1 n_lacunae blank (not 90 deg)", bool(pd.isna(q.loc["Q1", "n_lacunae"])), True)
+    check("T4_partial_quarter", "Q2 cortex_area = a quarter annulus", float(q.loc["Q2", "cortex_area_um2"]),
+          np.pi * (R_ROOT ** 2 - R_STELE ** 2) / 4 * A, .005)
+
+    # T5: aerenchyma in Q1: layer-5 cells over 0-60 deg gone (one lacuna). Cells present on those rays: 7; gap-aware
+    # ccfn: 8 on every ray (the lacuna counts as the cell it replaced)
+    def t5(npz, c, rg, m):
+        c[np.isin(c, [lab(c, 5, d) for d in range(5, 60, 10)])] = 0
+        P.save_edit(npz, cells=c)
+    i, q = tedit("T5_lacuna_ccfn", t5)
+    lac_a = 6 * CELL_AREA[4]
+    check("T5_lacuna_ccfn", "Q1 ccfn (gap-aware) 8", float(q.loc["Q1", "ccfn"]), 8.0)
+    check("T5_lacuna_ccfn", "Q1 cells present: 7 (12 of 18 rays cross the lacuna)",
+          float(q.loc["Q1", "ccfn_cells_present"]), 7.0)
+    check("T5_lacuna_ccfn", "Q1 n_lacunae 1", float(q.loc["Q1", "n_lacunae"]), 1.0)
+    check("T5_lacuna_ccfn", "Q1 lacuna area = 6 cells", float(q.loc["Q1", "lacuna_area_um2"]), lac_a * A, .03)
+    check("T5_lacuna_ccfn", "Q1 aerenchyma_share", float(q.loc["Q1", "aerenchyma_share"]),
+          lac_a / (np.pi * (R_ROOT ** 2 - R_STELE ** 2) / 4), .03)
+    check("T5_lacuna_ccfn", "Q2 untouched: share 0", float(q.loc["Q2", "aerenchyma_share"]), 0.0)
+    check("T5_lacuna_ccfn", "image ccfn still 8", float(i.ccfn), 8.0)
+    check("T5_lacuna_ccfn", "image aerenchyma_share = Q1 share / 4", float(i.aerenchyma_share),
+          lac_a / (np.pi * (R_ROOT ** 2 - R_STELE ** 2) / 4) / 4, .03)
+
+    # T5b: layer 1 gone all round (a gap between the stele edge and the cortex, as when the stele outline is drawn
+    # too small or the cortex pulls away): ccfn does not count the gap (7 = cells present); a lacuna does (T5)
+    i, q = tedit("T5b_gap_at_stele_not_counted",
+                 lambda npz, c, rg, m: (c.__setitem__(np.isin(c, [lab(c, 1, d) for d in range(5, 360, 10)]), 0),
+                                        P.save_edit(npz, cells=c)))
+    check("T5b_gap_at_stele_not_counted", "image ccfn 7", float(i.ccfn), 7.0)
+    check("T5b_gap_at_stele_not_counted", "= cells present", float(q.ccfn_cells_present.mean()), 7.0)
+
+    # T6: no stele: root size stays, every stele / cortex / metaxylem number blank (never 0)
+    def t6(npz, c, rg, m):
+        rg[rg == 2] = 1
+        m[:] = 0
+        P.save_edit(npz, region=rg, mx=m)
+    i, q = tedit("T6_no_stele", t6)
+    check("T6_no_stele", "root area measured", float(i.root_area_um2), np.pi * R_ROOT ** 2 * A, .005)
+    blank = [k for k in ("stele_area_um2", "cortex_area_est_um2", "stele_share", "mx_n", "axial_conductance_m4_MPa_s",
+                         "ccfn", "cortex_width_um") if pd.notna(i[k])]
+    check("T6_no_stele", "stele-dependent columns blank", ", ".join(blank) or "all blank", "all blank")
+    check("T6_no_stele", "quarters blank", bool(q.ccfn.isna().all()), True)
+
+    # T7: samples.xlsx written when only S was measured (as when the scale is set after the first image), with a
+    # renamed group column: Make results must still measure S_rot (it skipped it until 2026-11-10)
+    d = out_dir / "T7_stale_samples"
+    shutil.copytree(base, d)
+    shutil.rmtree(d / "results", ignore_errors=True)
+    pd.DataFrame([{"image_file": "S.tif", "plant": "P1", "um_per_px": UM, "include": "yes", "genotype": "B73"}]) \
+        .to_excel(d / "anatomy/samples.xlsx", index=False)
+    SUM.main(d / "anatomy")
+    t7 = traits(d)
+    s7 = pd.read_excel(d / "anatomy/samples.xlsx")
+    check("T7_stale_samples", "both images in traits", sorted(t7["Per image"].image_file), ["S.tif", "S_rot.tif"])
+    check("T7_stale_samples", "samples.xlsx: new row added, old row kept", len(s7), 2)
+    check("T7_stale_samples", "old row's scale kept", float(s7.set_index("image_file").at["S.tif", "um_per_px"]), UM)
+    check("T7_stale_samples", "renamed group column kept", "genotype" in t7["Per image"].columns, True)
+    # T8: include = no: left out, and START_HERE says so
+    s7.loc[s7.image_file == "S_rot.tif", "include"] = "no"
+    s7.to_excel(d / "anatomy/samples.xlsx", index=False)
+    SUM.main(d / "anatomy")
+    t8 = traits(d)
+    sh = pd.read_excel(next((d / "results").glob("anatomy_summary_*.xlsx")), sheet_name="START_HERE")
+    check("T8_include_no", "left out of traits", list(t8["Per image"].image_file), ["S.tif"])
+    check("T8_include_no", "START_HERE names it", sh.astype(str).apply(lambda r: r.str.contains("S_rot.tif")).any().any(),
+          True)
+
 
 if __name__ == "__main__":
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(tempfile.mkdtemp(prefix="rooh_check_"))

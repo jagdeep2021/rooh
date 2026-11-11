@@ -474,6 +474,45 @@ FILE_STEP_DEG = 0.5
 PATTERN_TISSUES = ("cortex", "epidermis")
 
 
+def ray_numbers(runs, stele_r=None, gaps: bool = True) -> list:
+    """File number (1 = next to the stele) of each run from ray_runs. gaps: a gap on the ray counts as the cells it
+    would have held, round(gap / the neighbouring cells' length on the ray); with stele_r (the stele radius on this
+    ray), a gap between the stele edge and the first cell too. Shared by cell_files and ccfn_rays."""
+    ks, k = [], 0
+    for i, (l, s0, n) in enumerate(runs):
+        if gaps:
+            if i == 0:
+                gap = s0 - stele_r if stele_r is not None else 0
+                local = n
+            else:
+                gap = s0 - (runs[i - 1][1] + runs[i - 1][2])
+                local = (n + runs[i - 1][2]) / 2
+            k += int(round(max(gap, 0) / local)) if local > 0 else 0
+        k += 1
+        ks.append(k)
+    return ks
+
+
+def ccfn_rays(cells, region, props, centre, arcs=()) -> pd.DataFrame:
+    """Gap-aware CCFN on each kept ray (RAY_ANGLES): the file number of the outermost cortical cell, counting a gap
+    BETWEEN cortical cells (aerenchyma lacuna, missed cell) as the cells it would have held (ray_numbers).
+    n_cortical_layers counts only the cells present, so aerenchyma lowers it. Unlike cell_files, a gap between the
+    stele edge and the first cell is NOT counted (2026-11-10): on the shipped examples it came from stele outlines
+    drawn too small (+1 to +13 phantom files on bad masks; A6_5_1: 13.4 vs 11) or cortex pulled away, not lost cells.
+    Columns: angle_deg, quarter, ccfn (0 = no cortical cell on the ray), cells (cells present: the old count).
+    ccfn well above cells with no aerenchyma = gaps Cellpose left between cells: check the cells."""
+    centre = centre_of(region, centre)
+    cortex = set(props.label[props.tissue == "cortex"].astype(int))
+    rows = []
+    for t in RAY_ANGLES:
+        if arcs and in_arcs([t], arcs)[0]:
+            continue
+        runs = ray_runs(cells, centre, t, cortex)
+        n = ray_numbers(runs, None)[-1] if runs else 0
+        rows.append({"angle_deg": float(t), "quarter": int(quarter_of(t)), "ccfn": n, "cells": len(runs)})
+    return pd.DataFrame(rows, columns=["angle_deg", "quarter", "ccfn", "cells"])
+
+
 def cell_files(cells, props, centre, arcs=(), step: float = FILE_STEP_DEG, tissues=PATTERN_TISSUES,
                region=None, gaps: bool = True) -> pd.DataFrame:
     """index label -> file (median number, 1 = next to the stele; the epidermis is the outermost file), file_rel
@@ -492,18 +531,8 @@ def cell_files(cells, props, centre, arcs=(), step: float = FILE_STEP_DEG, tissu
         runs = ray_runs(cells, centre, t, cortex)
         if not runs:
             continue
-        ks, k = [], 0
-        for i, (l, s0, n) in enumerate(runs):
-            if gaps:
-                if i == 0:
-                    gap = s0 - r_st[int(t) % 360] if r_st is not None else 0
-                    local = n
-                else:
-                    gap = s0 - (runs[i - 1][1] + runs[i - 1][2])
-                    local = (n + runs[i - 1][2]) / 2
-                k += int(round(max(gap, 0) / local)) if local > 0 else 0
-            k += 1
-            ks.append(k)
+        ks = ray_numbers(runs, r_st[int(t) % 360] if r_st is not None else None, gaps)
+        k = ks[-1]
         for (l, _, _), kk in zip(runs, ks):
             nums.setdefault(l, []).append(kk)
             rels.setdefault(l, []).append((kk - 0.5) / k)
@@ -816,6 +845,87 @@ def lacuna_traits(table, n_gaps: int, cortex_area_kept_px) -> dict:
             "n_lacunae_drawn": int(table.attrs.get("n_drawn", 0)),
             "aerenchyma_share": area / cortex_area_kept_px if cortex_area_kept_px else np.nan,
             "lacuna_r_norm_mean": float(np.average(table.r_norm, weights=table.area_px)) if len(table) else np.nan}
+
+
+# ---------------------------------------------------------------- traits file (decided with Jagdeep 2026-11-10)
+# Whole-image root area when arcs are excluded: "fill the edge". The kept angles are measured pixel by pixel; across
+# an excluded arc the root radius is interpolated linearly (around the circle) between the kept radii on either side,
+# and that wedge's area is 1/2 x (r + 0.5)^2 x dtheta (+0.5: the outer edge of the last pixel). Tested against
+# scaling by angle on 20 intact real sections with arcs cut out (docs/development/area_estimate.py): median error
+# 0.5% vs 1.8% (60 deg cut), 1.8% vs 3.5% (120 deg). Blank under MIN_EST_DEG kept: too little edge to interpolate.
+# Per quarter nothing is estimated: shares and medians need MIN_QUARTER_DEG kept, absolute areas and counts the whole
+# quarter (90 deg).
+MIN_EST_DEG = 180
+EST_STEP_DEG = 0.25
+WATER_VISCOSITY_MPA_S = 1.002e-9   # water at 20 C (1.002 mPa s), for Hagen-Poiseuille
+
+
+def root_area_filled(region, centre, arcs=()) -> float:
+    """Root area (px) with excluded arcs filled by the interpolated edge (see above). No arcs: the pixel count.
+    NaN under MIN_EST_DEG kept."""
+    centre = centre_of(region, centre)
+    root = region >= 1
+    if not arcs:
+        return float(root.sum())
+    if kept_deg(arcs) < MIN_EST_DEG:
+        return np.nan
+    yy, xx = np.nonzero(root)
+    kept_px = int((~in_arcs(angle_of(yy, xx, centre), arcs)).sum())
+    n = int(round(360 / EST_STEP_DEG))
+    r_rt = radial_profile(region, centre, n)[1]
+    t = np.arange(n) * EST_STEP_DEG
+    out = in_arcs(t + EST_STEP_DEG / 2, arcs)
+    k = np.nonzero(~out)[0]
+    r = np.interp(t, np.r_[t[k] - 360, t[k], t[k] + 360], np.r_[r_rt[k], r_rt[k], r_rt[k]])
+    return float(kept_px + 0.5 * np.sum((r[out] + 0.5) ** 2) * np.radians(EST_STEP_DEG))
+
+
+def axial_conductance(vessel_areas_px, um_per_px: float) -> float:
+    """Theoretical axial conductance of the metaxylem (m^4 MPa^-1 s^-1), Hagen-Poiseuille: pi x sum(r^4) / (8 eta),
+    r from each vessel's area (equivalent circle), water at 20 C (Tyree & Zimmermann 2002). A maximum: real vessels
+    have end walls, pits and non-circular lumens."""
+    a = np.asarray(vessel_areas_px, float)
+    if not len(a) or not np.isfinite(um_per_px):
+        return np.nan if not np.isfinite(um_per_px) else 0.0
+    r_m = np.sqrt(a / np.pi) * um_per_px * 1e-6
+    return float(np.pi * np.sum(r_m ** 4) / (8 * WATER_VISCOSITY_MPA_S))
+
+
+def quarter_traits(region, props, centre, arcs, lac_table, lac_mask, rays) -> list:
+    """One dict per quarter (Q1 = 0-90 deg, counter-clockwise), pixels. props: after exclude_sectors; lac_table /
+    lac_mask: lacunae(..., mask=True); rays: ccfn_rays(). Under MIN_QUARTER_DEG kept: only quarter + kept_deg.
+    Shares and medians from the kept angles; areas and counts only when the whole quarter is kept."""
+    centre = centre_of(region, centre)
+    r_st, r_rt = radial_profile(region, centre)
+    whole_deg = np.arange(360) + 0.5
+    yy, xx = np.nonzero(region == 1)                            # cortex = root outside the stele (as cortex_area)
+    a_px = angle_of(yy, xx, centre)
+    q_px, keep_px = quarter_of(a_px), ~in_arcs(a_px, arcs)
+    lac_px = lac_mask[yy, xx] > 0
+    c = props[props.tissue == "cortex"]
+    c_q = quarter_of(np.degrees(c.angle_rad))
+    out = []
+    for q, a0, a1 in QUARTERS:
+        kd = quarter_kept_deg(arcs, q)
+        row = {"quarter": f"Q{q}", "kept_deg": kd}
+        if kd >= MIN_QUARTER_DEG:
+            full = kd >= 90
+            dk = (whole_deg >= a0) & (whole_deg < a1) & ~in_arcs(whole_deg, arcs)
+            rq = rays[rays.quarter == q]
+            sel = (q_px == q) & keep_px
+            ctx, hole = int(sel.sum()), int((sel & lac_px).sum())
+            lq = lac_table[lac_table.quarter == q] if len(lac_table) else lac_table
+            row.update({"ccfn": float(np.median(rq.ccfn)) if len(rq) else np.nan,
+                        "ccfn_cells_present": float(np.median(rq.cells)) if len(rq) else np.nan, "n_rays": len(rq),
+                        "cortex_width_px": float(np.mean((r_rt - r_st)[dk])) if dk.any() else np.nan,
+                        "median_cortex_cell_area_px": float(c.area_px[c_q == q].median()) if (c_q == q).any() else np.nan,
+                        "aerenchyma_share": hole / ctx if ctx else np.nan,
+                        "cortex_area_px": ctx if full else np.nan,
+                        "lacuna_area_px": hole if full else np.nan,
+                        "n_lacunae": len(lq) if full else np.nan,
+                        "n_lacunae_drawn": int(lq.drawn.sum()) if full and len(lq) else (0 if full else np.nan)})
+        out.append(row)
+    return out
 
 
 def layer_image(cells: np.ndarray, props: pd.DataFrame) -> np.ndarray:
