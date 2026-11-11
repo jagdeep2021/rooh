@@ -10,9 +10,11 @@ cross_section_anatomy/
 ├── pipeline.py     propose() auto pass, derive() tissues/layers/areas, click edits, storage
 ├── run_batch.py    folder of images -> anatomy/masks/*.npz + anatomy/qc/*.png (resumable)
 ├── review.py       napari app: fix cells / stele / metaxylem / root; exclude damaged sectors
-├── summarise.py    masks -> results/{cortex_pattern, all_cells, anatomy_summary}_YYYY-MM-DD.xlsx
+├── summarise.py    masks -> results/traits_DATE.xlsx (overall anatomy, opens on START_HERE + Check),
+│                   cortex_pattern_DATE.xlsx (the curves, per quarter), cortex_cells_DATE.csv + all_cells_DATE.csv
+│                   (one row per cell); per image + per quarter only, µm (layout: docs/traits.md);
+│                   old_format/ = the pre-2026-11-10 workbooks for one release; earlier_runs/ = older dates;
 │                   + results/methods_YYYY-MM-DD.txt + results/figures/ (cortex pattern per species, per image)
-│                   anatomy_summary opens on START_HERE (files, unit = plant, what to check, where each answer is);
 │                   every workbook: README (each column: topic, unit, meaning) + run_info (Rooh commit, thresholds)
 ├── pattern_plots.py  splines, profile features, the figures (also the live plot in review.py)
 ├── Install (…), Open app (…)   double-click launchers (Mac .command, Windows .bat)
@@ -67,7 +69,7 @@ cross-section-anatomy` first). Stopping a local run does not stop calls already 
 
 ## Compare two sets of results
 
-`python compare.py <reference.xlsx> <other.xlsx>`: two `anatomy_summary_*.xlsx` of the same images (auto pass vs a
+`python compare.py <reference.xlsx> <other.xlsx>`: two `results/old_format/anatomy_summary_*.xlsx` of the same images (auto pass vs a
 review, or reviewer vs reviewer). Matches on image_file, compares pixel columns (scale can't fake a difference),
 and writes `compare_<other>_vs_<reference>.xlsx` next to `other`: per trait n changed, mean difference with 95%
 limits of agreement (Bland & Altman 1986), mean |% difference| and Lin's CCC (Lin 1989); per image the values.
@@ -138,7 +140,7 @@ Everything else is derived by `derive()`, so the editor and the summary always a
   - Sectors touch only cortex, epidermis, air spaces and unassigned cells. **Stele and metaxylem are always
     whole-section**; an unusable stele means excluding the image, not a sector.
   - **Biology is never a reason**: aerenchyma, collapsed or irregular cells are measured, not removed.
-  - Excluded cells stay in `all_cells` as `<tissue>_excluded` (`sector` = excluded).
+  - Excluded cells stay in `all_cells_DATE.csv` with `kept` = no.
   - Why: on R1 (04_root_anatomy `12_sector_vs_spoke`) the pattern from all cortical cells was far more
     reliable than from one file: split-half r 0.87 vs 0.52, sectors better in 16 of 19 sections (Wilcoxon
     *P* = 0.002), ~340 vs ~31 cells per section.
@@ -233,11 +235,22 @@ Everything else is derived by `derive()`, so the editor and the summary always a
    check it exists (epidermis lost in sectioning leaves it NaN).
 8. **Layer range**: `n_cortical_layers` is the median over rays; a wide `_min`–`_max` means an uneven cortex or a
    segmentation gap. Look before using the number.
-- **Replicate** = `plant` in samples.xlsx; per_plant averages that plant's images.
+- **Replicate** = the plant. Results are per image and per quarter; join plant and treatment on `image_file` and
+  average per plant (or use plant as a random effect). Never use cells, quarters or images as n.
 
 ## Development protocols
 
 Why the measurements are defined the way they are, and how they differ from earlier lab pipelines: [docs/development/](docs/development/README.md).
+
+Two test suites, both on synthetic sections with known answers; run both before a pull request that touches them:
+
+- `tests/check_numbers.py`: every measurement and output file (~1 min).
+- `tests/check_app.py [out_dir] [--no-cellpose]`: the whole app in a headless browser, website and desktop.
+  It starts its own servers on a scratch folder, so it never touches real projects or `~/.rooh`. Every button,
+  shortcut and server route is used at least once and checked on disk (zoom, pan, every edit tool, undo/redo,
+  scale ruler, upload, Outline, Make results, download, delete, invite/approve/remove). It fails if a new control
+  or route is never used. About 2.5 min with Cellpose, 2 without. Setup once:
+  `.venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m playwright install chromium-headless-shell`.
 
 ## Status (2026-11-02)
 

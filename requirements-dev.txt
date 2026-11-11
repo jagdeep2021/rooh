@@ -1,0 +1,1 @@
+playwright==1.65.0   # tests/check_app.py only; then: .venv/bin/python -m playwright install chromium-headless-shell

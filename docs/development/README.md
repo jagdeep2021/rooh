@@ -207,3 +207,62 @@ Rooh started on 2026-10-27 as `cross_section_anatomy`, was briefly renamed JadNa
   - ![Vessel click old vs new](vessel_click.png) (`vessel_click.py`): every vessel in the shipped examples was erased and clicked at its centre. Within 0.8–1.4× the original vessel: 19 → 31 of 41. Over 1.4×: 12 → 7, mostly Image_0088, where the stored vessel is the inner lumen only and the new click follows the lumen edge. A dot (under 0.3×): 6 → 0.
   - `tests/check_numbers.py` 08b (vessel clicked back: area π·15² exact) and 08c (wall gap onto an equally dark stele cell: the old rule took 7,729 px for a 707 px vessel and the whole neighbour; the new one 705 px, neighbour intact). 190 of 190 pass.
 - **Re-run:** none. This is an editing rule, not a measurement; vessels already saved are unchanged.
+
+## 2026-11-10 · Make results measured only the images in an old samples.xlsx
+- **Problem (Jagdeep):** Make results exported one image. `samples.xlsx` is written once, the first time it is needed (on the web, setting the scale writes it), and was never updated. Images measured afterwards had no row, and Make results skipped any image without a row, without a word. Reproduced on a copy of the Hallie example: samples.xlsx with 1 row, 10 masks → 1 image in every workbook.
+- **Fix:** `write_samples` now adds a row for every measured image missing from samples.xlsx. Existing rows and their edits are never changed; the folder names fill the group columns by position, so a renamed `group_1` still fills. Make results prints and lists in START_HERE every measured image it leaves out, with the reason (`include = no`).
+- **Evidence:** the repro now gives 10 of 10. `tests/check_numbers.py` T7 (stale samples.xlsx with a renamed group column: both images measured, the old row's scale kept) and T8 (`include = no`: left out and named in START_HERE).
+- **Re-run:** every project made results with images measured after samples.xlsx was written. Open the project and click Make results; then set the scale for the new rows.
+
+## 2026-11-10 · traits_DATE.xlsx: the short overall file, per image and per quarter
+- **Decision (Jagdeep):** one simple traits file next to the full workbooks. It is **per image and per quarter only, never per plant**, because the user does not always know the plants and joins plant and treatment later by `image_file`. It has few columns, each described in its README sheet and in `docs/traits.md`. Its sheets:
+  - **Per image:** root, stele, metaxylem with axial conductance, and the quarter means of the cortex traits.
+  - **Per quarter:** CCFN, cortex width, median cell size, aerenchyma.
+  - **Cell area by file**, plus the cell counts behind each mean.
+- **Rules (Jagdeep):**
+  - A quarter with < 45° kept is blank.
+  - Shares, medians, widths and CCFN are given from 45° kept up. Absolute areas and counts per quarter are given only with all 90° kept. Nothing per quarter is estimated.
+  - Whole-image root area uses **fill the edge**: the kept angles pixel by pixel, the root radius interpolated across each excluded arc. Cortex = that − stele, and diameter = its equivalent circle. Blank under 180° kept.
+- **Why fill the edge:** ![Root area estimates](area_estimate.png) (`area_estimate.py`, numbers in `area_estimate.csv`). On 20 intact real sections, an arc was cut at 8 positions and each estimate compared with the true area.
+  - **60° arc**, median |error|: scale-by-angle 1.81%, fill the edge 0.41%, Fourier fit 0.56%. Worst: 7.9%, 4.5%, 10.0%.
+  - **120° arc**, median |error|: 3.54%, 1.90%, 1.92%. Worst: 15.4%, 14.3%, 24.0%.
+  - **Known weak case:** a 120° arc over the long side of an oval root. The interpolation cuts the bulge, −14.5% on a synthetic 400×250 oval. Read estimates with ~120° or more excluded with care.
+- **CCFN in this file is gap-aware** (`ccfn`, beside `ccfn_cells_present`, the old rule).
+  - A gap between cortical cells (lacuna, missed cell) counts as the cells it would hold; this is the `cell_files` rule.
+  - **A gap between the stele edge and the first cell does not count, unlike in `cell_files`.** On the shipped examples it came from stele outlines drawn too small, not lost cells. Counting it gave +1 to +13 phantom files on bad masks (Hallie A6_5_1: 13.4 vs 11 without it, 10 cells present; Amool brightfield jpgs up to +13). On good masks the two rules agree (Hallie maize and Setaria: 0 to +1 over cells present).
+  - **Open:** `cell_files` (file numbers, the `file` pattern basis, Cell area by file) still counts the stele-edge gap. Changing it changes past results, so it needs its own entry.
+- **Axial conductance:** Hagen–Poiseuille, π Σ r⁴ / (8 η), with r from each vessel's area and water at 20 °C. A theoretical maximum (Tyree & Zimmermann 2002).
+- **Evidence:** `tests/check_numbers.py` T1–T8 (the geometry answers for every column):
+  - edge torn over 60° and excluded: root area back within 0.15% of the circle;
+  - a partial quarter: areas blank, shares given;
+  - a lacuna: `ccfn` 8 vs 7 cells present;
+  - layer 1 gone all round: `ccfn` 7;
+  - no stele: all blank, never 0;
+  - the stale samples.xlsx.
+  261 of 261 pass. On copies of both shipped example projects, every traits number shared with `anatomy_summary` matches it exactly.
+- **Real masks to fix before reading them:**
+  - Hallie A6_5_1: the auto stele covers about a third of the stele, so stele cells count as cortex.
+  - Amool's brightfield jpgs (Image_0001, 0022, 0045, 0060, 0070, 0080, 0088): the root outline is the whole frame and the stele is tiny (the known brightfield gap). Their DAPI twins are fine.
+- **Re-run:** Make results writes the new file; nothing old changes.
+
+## 2026-11-10 · Results in three outputs; the old workbooks move to old_format/
+- **Decision (Jagdeep):** four workbooks with overlapping sheets were too much. Make results now writes three outputs:
+  1. `traits_DATE.xlsx`, overall anatomy. It opens on START_HERE, then a new **Check** sheet: plain-word flags per image, plus the counts behind them.
+  2. `cortex_pattern_DATE.xlsx`, the curves, with the traits file's quarter rules:
+     - one row per image × quarter, plus `image` = the mean of the quarters;
+     - position basis and relative size only;
+     - quarters under 45° kept as blank rows.
+  3. `cortex_cells_DATE.csv` and `all_cells_DATE.csv`, one row per cell, in Jagdeep's spec: image, quarter, x/y, angle, radius in µm and normalised, file number, area in px and µm², and the cell type in all_cells. CSV because these are large and for scripts.
+- **Nothing per plant, no duplicate columns:** each value appears once. Only `image_file` and the grouping columns repeat, as join keys.
+- **Old format:** `anatomy_summary`, `all_cells.xlsx` and the full `cortex_pattern` (file and distance bases, `_abs`, `_rel_cortex`, whole-section fits, per_plant) are still written, into `results/old_format/`, for ONE release so existing scripts run. Delete in the next release.
+  - Old-format files already in a project are moved there on the next run.
+  - Outputs of earlier dates move to `results/earlier_runs/`, so the top of `results/` holds only the current run. Nothing is deleted.
+- **No number changes.** The new files are drawn from the same measurements: cortex_cells rows = `n_cortex_cells` per image on both shipped examples, and excluded cells in all_cells.csv = `cortex_excluded` in the old all_cells.
+- **Evidence:** `tests/check_numbers.py`, 289 of 289 pass. New checks:
+  - the layout: top files, old_format, START_HERE first;
+  - cortex_cells.csv on the synthetic section: 288 cells, 72 per quarter, file = layer, r_norm and area of layer 5;
+  - all_cells.csv cell types (cortex 288, epidermis 72, metaxylem 6, stele 37), and kept = no in an excluded arc;
+  - curve features: the image row is the quarter mean, the peak sits in layer 6, a blank Q3 row;
+  - the Check flags.
+  Both example projects run, with an earlier run's files moved aside.
+- **Re-run:** Make results on any project to get the new files.
