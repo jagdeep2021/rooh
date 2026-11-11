@@ -118,17 +118,17 @@ def write_project(d: Path, images: dict):
 
 def results(d: Path) -> dict:
     SUM.main(d / "anatomy")
-    out = d / "results"
+    out = d / "results" / "old_format"         # the full record (old format, kept for one release)
     img = pd.read_excel(next(out.glob("anatomy_summary_*.xlsx")), sheet_name="per_image")
-    prof_all = pd.read_excel(next(out.glob("cortex_pattern_*.xlsx")), sheet_name="per_image_profile", dtype={"bin": str})
+    prof_all = pd.read_excel(next(out.glob("cortex_pattern_full_*.xlsx")), sheet_name="per_image_profile", dtype={"bin": str})
     prof = prof_all[(prof_all.basis == "position") & (prof_all.scope == "section")]
     plant = pd.read_excel(next(out.glob("anatomy_summary_*.xlsx")), sheet_name="per_plant")
     cells = pd.read_excel(next(out.glob("all_cells_*.xlsx")), sheet_name="all_cells")
     img["quarters_used"] = img.quarters_used.astype(str)
-    feats = pd.read_excel(next(out.glob("cortex_pattern_*.xlsx")), sheet_name="profile_features")
+    feats = pd.read_excel(next(out.glob("cortex_pattern_full_*.xlsx")), sheet_name="profile_features")
     xl = next(out.glob("anatomy_summary_*.xlsx"))
     lac = pd.read_excel(xl, sheet_name="lacunae")
-    aer = pd.read_excel(next(out.glob("cortex_pattern_*.xlsx")), sheet_name="aerenchyma_profile")
+    aer = pd.read_excel(next(out.glob("cortex_pattern_full_*.xlsx")), sheet_name="aerenchyma_profile")
     return {"img": img.set_index("image_file"), "prof": prof, "prof_all": prof_all, "plant": plant, "cells": cells,
             "feats": feats, "lac": lac, "aer": aer}
 
@@ -234,7 +234,7 @@ def run(out_dir: Path):
     check("loss", "outer layer + epidermis lost: file numbers unchanged (counted from the stele)",
           float((np.floor(k.file + 0.5) == k.true_layer).mean()), 1.0)
     docs = []                                    # output documentation: every column described, run info written
-    for wb in sorted((base / "results").glob("*.xlsx")):
+    for wb in sorted((base / "results").rglob("*.xlsx")):
         rd = pd.read_excel(wb, sheet_name="README")
         rd = rd[rd.column.notna()]
         docs += [f"{wb.name.split('_20')[0]}:{c}" for c in rd.column[rd["what it is"].fillna("").str.strip() == ""]]
@@ -584,6 +584,50 @@ def traits_checks(out_dir: Path, base: Path, gray):
     miss = sorted({c for _, c in cols if f"`{c}`" not in tr} - {"image_file", "status", "um_per_px"})
     ck("every traits column is in docs/traits.md", ", ".join(miss) or "none missing", "none missing")
 
+    # the layout (2026-11-10): three outputs on top, the old workbooks in old_format/
+    top = sorted(p.name.split("_20")[0] for p in (base / "results").iterdir() if p.is_file())
+    ck("results/: traits, cortex_pattern, 2 cell CSVs, methods", ",".join(top),
+       "all_cells,cortex_cells,cortex_pattern,methods,traits")
+    old = sorted(p.name.split("_20")[0] for p in (base / "results/old_format").iterdir())
+    ck("old_format/: the 3 old workbooks", ",".join(old), "all_cells,anatomy_summary,cortex_pattern_full")
+    ck("traits opens on START_HERE", pd.ExcelFile(next((base / "results").glob("traits_*.xlsx"))).sheet_names[0],
+       "START_HERE")
+    cc = pd.read_csv(next((base / "results").glob("cortex_cells_*.csv")))
+    cc = cc[cc.image_file == "S.tif"]
+    ck("cortex_cells.csv: 288 cells", len(cc), 288)
+    ck("cortex_cells.csv: 72 per quarter", ",".join(str(v) for v in cc.quarter.value_counts().sort_index()),
+       "72,72,72,72")
+    ck("cortex_cells.csv: file = layer (1-8, 36 each)", ",".join(str(v) for v in
+       np.floor(cc.file + 0.5).astype(int).value_counts().sort_index()), ",".join(["36"] * 8))
+    mid = (EDGES[4] + EDGES[5]) / 2
+    l5 = cc[np.floor(cc.file + 0.5) == 5]
+    ck("cortex_cells.csv: layer 5 r_norm", float(l5.r_norm.median()), (mid - R_STELE) / (R_ROOT - R_STELE), .03)
+    ck("cortex_cells.csv: layer 5 area_um2", float(l5.area_um2.median()), CELL_AREA[4] * A, .03)
+    ck("cortex_cells.csv: area_um2 = area_px x 0.25", float((cc.area_um2 / cc.area_px).median()), A, 1e-9)
+    ck("cortex_cells.csv: r_um / r_norm consistent (layer 5 r_um)", float(l5.r_um.median()), mid * UM, .03)
+    ac = pd.read_csv(next((base / "results").glob("all_cells_*.csv")))
+    ac = ac[ac.image_file == "S.tif"]
+    ck("all_cells.csv: cell types", ",".join(f"{k}:{v}" for k, v in ac.tissue.value_counts().sort_index().items()),
+       "cortex:288,epidermis:72,metaxylem:6,stele:37")
+    ck("all_cells.csv: all kept (nothing excluded)", set(ac.kept), {"yes"})
+    cf = pd.read_excel(next((base / "results").glob("cortex_pattern_*.xlsx")), sheet_name="Curve features")
+    cf = cf[cf.image_file == "S.tif"].set_index("quarter")
+    ck("curve features: Q1-Q4 + image", ",".join(cf.index), "Q1,Q2,Q3,Q4,image")
+    ck("curve features: image = mean of quarters", float(cf.loc["image", "peak_height"]),
+       float(cf.loc[["Q1", "Q2", "Q3", "Q4"], "peak_height"].mean()), 1e-9)
+    ck("curve features: peak in the mid cortex (layer 6, r_norm ~0.65)", float(cf.loc["image", "peak_pos"]),
+       ((EDGES[5] + EDGES[6]) / 2 - R_STELE) / (R_ROOT - R_STELE), .15)
+    pf = pd.read_excel(next((base / "results").glob("cortex_pattern_*.xlsx")), sheet_name="Profile")
+    pf = pf[pf.image_file == "S.tif"]
+    ck("profile: 10 bins x (4 quarters + image)", len(pf), 50)
+    pm = pf.groupby(["quarter"]).rel.sum()
+    ck("profile: image rel = mean of quarters", float(pm["image"]), float(pm[["Q1", "Q2", "Q3", "Q4"]].mean()), 1e-9)
+    chk = pd.read_excel(next((base / "results").glob("traits_*.xlsx")), sheet_name="Check").set_index("image_file")
+    ck("Check: an unreviewed clean image says only 'not reviewed'", chk.at["S.tif", "flags"], "not reviewed")
+    for sh in ("Per quarter", "Cell area by file", "Cells per file", "Check"):
+        ck(f"no duplicate columns: {sh} has no status / um_per_px", bool({"status", "um_per_px"} & set(t[sh].columns)
+                                                                         if sh in t else False), False)
+
     def tedit(case, fn):
         d = out_dir / case
         shutil.copytree(base, d)
@@ -614,6 +658,22 @@ def traits_checks(out_dir: Path, base: Path, gray):
     check("T2_torn_edge_filled", "Q3 (30 deg kept): blank", bool(pd.isna(q.loc["Q3", "ccfn"])), True)
     check("T2_torn_edge_filled", "Q3 kept_deg", float(q.loc["Q3", "kept_deg"]), 30.0)
     check("T2_torn_edge_filled", "n_quarters_used", int(i.n_quarters_used), 3)
+    d2 = out_dir / "T2_torn_edge_filled" / "results"
+    ac = pd.read_csv(next(d2.glob("all_cells_*.csv")))
+    ac = ac[(ac.image_file == "S.tif") & (ac.tissue == "cortex")]
+    full = pd.read_excel(next((d2 / "old_format").glob("anatomy_summary_*.xlsx")), sheet_name="per_image") \
+        .set_index("image_file").loc["S.tif"]
+    oc = pd.read_excel(next((d2 / "old_format").glob("all_cells_*.xlsx")), sheet_name="all_cells")
+    check("T2_torn_edge_filled", "all_cells.csv: kept = no for every excluded cortex cell",
+          int((ac.kept == "no").sum()), int(((oc.image_file == "S.tif") & (oc.tissue == "cortex_excluded")).sum()))
+    check("T2_torn_edge_filled", "all_cells.csv: none of them in the kept angles",
+          bool(P.in_arcs(np.degrees(ac[ac.kept == "no"].angle_rad), [(180, 240, "")]).all()), True)
+    cc = pd.read_csv(next(d2.glob("cortex_cells_*.csv")))
+    check("T2_torn_edge_filled", "cortex_cells.csv rows = n_cortex_cells", int((cc.image_file == "S.tif").sum()),
+          int(full.n_cortex_cells))
+    cf = pd.read_excel(next(d2.glob("cortex_pattern_*.xlsx")), sheet_name="Curve features")
+    q3 = cf[(cf.image_file == "S.tif") & (cf.quarter == "Q3")]
+    check("T2_torn_edge_filled", "curves: Q3 row there, blank", (len(q3), bool(q3.peak_height.isna().all())), (1, True))
 
     # T3: under 180 deg kept: no estimate (too little edge to interpolate), the measured area stays
     i, q = tedit("T3_little_kept", lambda npz, c, rg, m: P.save_edit(npz, **P.sector_arrays([(0, 200, "torn")])))
@@ -670,6 +730,8 @@ def traits_checks(out_dir: Path, base: Path, gray):
                          "ccfn", "cortex_width_um") if pd.notna(i[k])]
     check("T6_no_stele", "stele-dependent columns blank", ", ".join(blank) or "all blank", "all blank")
     check("T6_no_stele", "quarters blank", bool(q.ccfn.isna().all()), True)
+    chk = pd.read_excel(next((out_dir / "T6_no_stele/results").glob("traits_*.xlsx")), sheet_name="Check")
+    check("T6_no_stele", "Check flags: no stele", "no stele" in chk.set_index("image_file").at["S.tif", "flags"], True)
 
     # T7: samples.xlsx written when only S was measured (as when the scale is set after the first image), with a
     # renamed group column: Make results must still measure S_rot (it skipped it until 2026-11-10)
@@ -690,7 +752,7 @@ def traits_checks(out_dir: Path, base: Path, gray):
     s7.to_excel(d / "anatomy/samples.xlsx", index=False)
     SUM.main(d / "anatomy")
     t8 = traits(d)
-    sh = pd.read_excel(next((d / "results").glob("anatomy_summary_*.xlsx")), sheet_name="START_HERE")
+    sh = pd.read_excel(next((d / "results").glob("traits_*.xlsx")), sheet_name="START_HERE")
     check("T8_include_no", "left out of traits", list(t8["Per image"].image_file), ["S.tif"])
     check("T8_include_no", "START_HERE names it", sh.astype(str).apply(lambda r: r.str.contains("S_rot.tif")).any().any(),
           True)

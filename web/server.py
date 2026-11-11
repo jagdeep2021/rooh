@@ -586,7 +586,7 @@ def project(name: str, u: dict = Depends(user)):
     imgs = _images(d)
     for im in imgs:
         im["um_per_px"] = scale.get(im["image"])
-    results = sorted(p.name for p in (d / "results").glob("*.xlsx")) if (d / "results").exists() else []
+    results = _result_files(d)
     figs = d / "results" / "figures"
     figures = sorted(p.relative_to(figs).as_posix() for p in figs.rglob("*.png")) if figs.exists() else []
     return {"name": d.name, "images": imgs, "job": JOBS.get(str(d)), "results": results, "figures": figures}
@@ -790,13 +790,19 @@ def set_scale(name: str, um_per_px: float = Form(...), group: str = Form(""), re
     return {"set": int(rows.sum())}
 
 
+def _result_files(d: Path) -> list:
+    """The current run's outputs (top of results/; old_format/ and earlier_runs/ are not listed)."""
+    r = d / "results"
+    return sorted(p.name for p in r.iterdir() if p.suffix in (".xlsx", ".csv")) if r.exists() else []
+
+
 @app.post("/api/projects/{name}/results")
 def make_results(name: str, image_figures: bool = Form(False), u: dict = Depends(user)):
     d = _project(u, name)
     if not any((d / "anatomy" / "masks").glob("*.npz")):
         raise HTTPException(400, "Measure the images first.")
     SUM.main(d / "anatomy", image_figures)
-    return {"results": sorted(p.name for p in (d / "results").glob("*.xlsx"))}
+    return {"results": _result_files(d)}
 
 
 @app.get("/api/projects/{name}/download")

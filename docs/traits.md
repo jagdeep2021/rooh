@@ -37,12 +37,44 @@ explains how they came about.
 
 ---
 
-## The traits file (`traits_DATE.xlsx`, since 2026-11-10)
+## What Make results writes (since 2026-11-10)
 
-The short overall file: **per image and per quarter only**, never per plant (the user joins plant, treatment and
-anything else on `image_file` later). Sizes in µm; blank without a scale (the full record in `anatomy_summary` keeps
-pixels). Every row carries `image_file` and the grouping columns from `samples.xlsx`. Every image measured and not
-set to `include = no` is in it; `START_HERE` in `anatomy_summary` lists any image left out and why.
+```
+results/
+  traits_DATE.xlsx          START_HERE, README, Check, Per image, Per quarter, Cell area by file, Cells per file
+  cortex_pattern_DATE.xlsx  Curve features, Profile, Fitted curves, Aerenchyma by position
+  cortex_cells_DATE.csv     one row per kept cortical cell
+  all_cells_DATE.csv        one row per object, every tissue, kept yes/no
+  methods_DATE.txt
+  figures/
+  earlier_runs/             outputs of earlier dates (moved here, never deleted)
+  old_format/               anatomy_summary, all_cells.xlsx, cortex_pattern_full: the pre-2026-11-10 workbooks,
+                            kept for ONE release so existing scripts run; the sections below 1-7 describe them
+```
+
+Per image and per quarter only, never per plant: the user joins plant, treatment and anything else on `image_file`
+later. Every row carries `image_file` and the grouping columns from `samples.xlsx`; no other column repeats across
+sheets. Every image measured and not set to `include = no` is in every file; `START_HERE` lists any left out and why.
+
+**Check sheet** (traits): one row per image, `flags` = plain reasons to look before using it (not reviewed, no
+scale, no stele, blank quarters, root area not estimated, gaps add cell files ≥ 2 in a quarter, giant cortex cells,
+missed-cell gaps, epidermis mostly missing, lacunae overruled by hand), plus the counts behind them
+(`n_giant_cortex_cells`, `n_gaps_missed_cell`, `epidermis_deg`, `n_lacunae_overridden`, as in section 2).
+
+**cortex_pattern** (the curves, quarter rules as below; position basis, relative size):
+- `Curve features`: per image × quarter (+ `image` = the mean of the quarters; its `kept_deg` and `n_cells` are the
+  sums): `peak_height`, `peak_pos`, `rise_slope`, `decay_slope`, `outer_rise` of the smoothing spline through the bin
+  medians, relative to the image's median cell (section 6). Quarters under 45° kept: a blank row.
+- `Profile`: per image × quarter × bin (10 equal r_norm bins): `n_cells`, `median_area_um2`, `rel`, `few_cells`.
+- `Fitted curves`: the spline at r_norm 0, 0.05 … 1 (`fitted`), per image × quarter: the input for fPCA.
+- `Aerenchyma by position`: per image × bin, `lacuna_share` (kept angles).
+The file and distance bases, `_abs`, `_rel_cortex` and whole-section fits are in `old_format/cortex_pattern_full`.
+
+**Cell CSVs**: `cell`, (`tissue`, `kept`: all_cells only), `quarter`, `x_px`, `y_px`, `angle_rad` (around the stele
+centre, counter-clockwise from the image's right), `r_um` (from the stele centre), `r_norm` (0 stele edge, 1 root
+edge, along the cell's direction), `file` (estimated cell file number, cortex and epidermis), `area_px`, `area_um2`.
+
+## The traits file (`traits_DATE.xlsx`)
 
 **Rules.** A quarter (Q1 = 0–90°, then counter-clockwise, around the centre) with < 45° kept is blank. Shares,
 medians, widths and `ccfn` use the kept angles from 45° up; **absolute areas and counts per quarter only when all 90°

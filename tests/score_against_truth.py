@@ -63,7 +63,7 @@ def main(sec: Path, anat: Path):
     s.to_excel(anat / "samples.xlsx", index=False)
     SUM.main(anat)
     res = anat.parent / "results"
-    got = pd.read_excel(sorted(res.glob("anatomy_summary_*.xlsx"))[-1], sheet_name="per_image").set_index("image_file")
+    got = pd.read_excel(sorted(res.rglob("anatomy_summary_*.xlsx"))[-1], sheet_name="per_image").set_index("image_file")
     rows = []
     for img in truth.index:
         t = np.load(sec / "truth/masks" / img.replace(".tif", ".npz"))

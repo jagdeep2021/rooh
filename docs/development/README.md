@@ -244,3 +244,25 @@ Rooh started on 2026-10-27 as `cross_section_anatomy`, was briefly renamed JadNa
   - Hallie A6_5_1: the auto stele covers about a third of the stele, so stele cells count as cortex.
   - Amool's brightfield jpgs (Image_0001, 0022, 0045, 0060, 0070, 0080, 0088): the root outline is the whole frame and the stele is tiny (the known brightfield gap). Their DAPI twins are fine.
 - **Re-run:** Make results writes the new file; nothing old changes.
+
+## 2026-11-10 · Results in three outputs; the old workbooks move to old_format/
+- **Decision (Jagdeep):** four workbooks with overlapping sheets were too much. Make results now writes three outputs:
+  1. `traits_DATE.xlsx`, overall anatomy. It opens on START_HERE, then a new **Check** sheet: plain-word flags per image, plus the counts behind them.
+  2. `cortex_pattern_DATE.xlsx`, the curves, with the traits file's quarter rules:
+     - one row per image × quarter, plus `image` = the mean of the quarters;
+     - position basis and relative size only;
+     - quarters under 45° kept as blank rows.
+  3. `cortex_cells_DATE.csv` and `all_cells_DATE.csv`, one row per cell, in Jagdeep's spec: image, quarter, x/y, angle, radius in µm and normalised, file number, area in px and µm², and the cell type in all_cells. CSV because these are large and for scripts.
+- **Nothing per plant, no duplicate columns:** each value appears once. Only `image_file` and the grouping columns repeat, as join keys.
+- **Old format:** `anatomy_summary`, `all_cells.xlsx` and the full `cortex_pattern` (file and distance bases, `_abs`, `_rel_cortex`, whole-section fits, per_plant) are still written, into `results/old_format/`, for ONE release so existing scripts run. Delete in the next release.
+  - Old-format files already in a project are moved there on the next run.
+  - Outputs of earlier dates move to `results/earlier_runs/`, so the top of `results/` holds only the current run. Nothing is deleted.
+- **No number changes.** The new files are drawn from the same measurements: cortex_cells rows = `n_cortex_cells` per image on both shipped examples, and excluded cells in all_cells.csv = `cortex_excluded` in the old all_cells.
+- **Evidence:** `tests/check_numbers.py`, 289 of 289 pass. New checks:
+  - the layout: top files, old_format, START_HERE first;
+  - cortex_cells.csv on the synthetic section: 288 cells, 72 per quarter, file = layer, r_norm and area of layer 5;
+  - all_cells.csv cell types (cortex 288, epidermis 72, metaxylem 6, stele 37), and kept = no in an excluded arc;
+  - curve features: the image row is the quarter mean, the peak sits in layer 6, a blank Q3 row;
+  - the Check flags.
+  Both example projects run, with an earlier run's files moved aside.
+- **Re-run:** Make results on any project to get the new files.
