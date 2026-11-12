@@ -464,10 +464,13 @@ def ray_layers(cells, region, props, centre, theta_deg: float) -> int:
 # Cell file number per cell, from the same kind of rays that count CCFN: along each ray (every
 # FILE_STEP_DEG in the kept angles) the cortical and epidermal cells are numbered 1, 2 ... from the stele out; a cell's file is the
 # median of the numbers its rays gave it (file_rel: median of (k - 0.5) / n, n = files on that ray). Since 2026-11-04
-# a gap on the ray (lacuna, missed cell, gap at the stele edge) counts as the cells it would have held, so cells
+# a gap on the ray between cells (lacuna, missed cell; not the gap at
+# the stele edge, since 2026-11-11) counts as the cells it would have held, so cells
 # beyond it keep their number (docs/development/loss_robustness.py; on R1, lacuna sections went from epidermis =
 # file 9-11 to 14, matching the lacuna-free mature section S29 at 13-14).
 FILE_STEP_DEG = 0.5
+FILE_COMPLETE_PCT = 10     # cells per file: a file is counted when it goes all round, i.e. at most this % of kept rays
+                           # end before it (a few rays through a missed cell or debris do not cut a ring short)
 # The pattern = every cell outside the endodermis (decided with Jagdeep 2026-11-03): the epidermis is the outer part of
 # the same tissue, binned by position like any cell, peak anywhere (as in Tyler's maize-cells, which never split it
 # out; and "epidermis" here is a position tag, not a cell type). _rel_cortex = the same without the tagged cells.
@@ -514,31 +517,41 @@ def ccfn_rays(cells, region, props, centre, arcs=()) -> pd.DataFrame:
 
 
 def cell_files(cells, props, centre, arcs=(), step: float = FILE_STEP_DEG, tissues=PATTERN_TISSUES,
-               region=None, gaps: bool = True) -> pd.DataFrame:
+               gaps: bool = True) -> pd.DataFrame:
     """index label -> file (median number, 1 = next to the stele; the epidermis is the outermost file), file_rel
     (0-1), n_rays. props: after exclude_sectors (only kept cells are numbered). CCFN (n_cortical_layers) stays
     cortex only.
-    gaps (2026-11-04): a gap on a ray (aerenchyma lacuna, a missed cell; with `region`, also a gap between the stele
-    edge and the first cell) counts as the cells it would have held, round(gap / the neighbouring cells' length on
-    the ray), so the cells beyond it keep their file number. Small gaps (walls, air spaces at junctions: < half a
-    cell) add nothing. Without it a lacuna two cells deep numbered every cell outside it two files too low."""
+    gaps (2026-11-04): a gap BETWEEN cells on a ray (aerenchyma lacuna, a missed cell) counts as the cells it would
+    have held, round(gap / the neighbouring cells' length on the ray), so the cells beyond it keep their file number.
+    Small gaps (walls, air spaces at junctions: < half a cell) add nothing. Without it a lacuna two cells deep
+    numbered every cell outside it two files too low. A gap between the stele edge and the first cell is NOT counted
+    (2026-11-11, as ccfn_rays since 2026-11-10): it came from stele outlines drawn too small (A6_5_1: 32 files).
+    .attrs["ray_files"]: the files on each kept ray (the last number), for complete_files()."""
     cortex = set(props.label[props.tissue.isin(tissues)].astype(int))
-    r_st = radial_profile(region, centre)[0] if (gaps and region is not None and (region == 2).any()) else None
-    nums, rels = {}, {}
+    nums, rels, last = {}, {}, []
     for t in np.arange(step / 2, 360, step):
         if arcs and in_arcs([t], arcs)[0]:
             continue
         runs = ray_runs(cells, centre, t, cortex)
         if not runs:
             continue
-        ks = ray_numbers(runs, r_st[int(t) % 360] if r_st is not None else None, gaps)
+        ks = ray_numbers(runs, None, gaps)
         k = ks[-1]
+        last.append(k)
         for (l, _, _), kk in zip(runs, ks):
             nums.setdefault(l, []).append(kk)
             rels.setdefault(l, []).append((kk - 0.5) / k)
-    return pd.DataFrame({"file": {l: float(np.median(v)) for l, v in nums.items()},
-                         "file_rel": {l: float(np.median(v)) for l, v in rels.items()},
-                         "n_rays": {l: len(v) for l, v in nums.items()}}, dtype=float)
+    out = pd.DataFrame({"file": {l: float(np.median(v)) for l, v in nums.items()},
+                        "file_rel": {l: float(np.median(v)) for l, v in rels.items()},
+                        "n_rays": {l: len(v) for l, v in nums.items()}}, dtype=float)
+    out.attrs["ray_files"] = last
+    return out
+
+
+def complete_files(ray_files) -> int:
+    """Files that go all the way round: the FILE_COMPLETE_PCT percentile of the files on each kept ray (rounded
+    down). Outer files beyond it exist only where the cortex is thicker, so their cell count is not a ring's."""
+    return int(np.floor(np.percentile(ray_files, FILE_COMPLETE_PCT))) if len(ray_files) else 0
 
 
 # ---------------------------------------------------------------- sectors (decided with Jagdeep 2026-11-02)

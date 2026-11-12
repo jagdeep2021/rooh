@@ -432,13 +432,16 @@ TRAIT_SHEETS = {
     "Cell area by file": "one row per image: mean cell area (µm²) in each cell file, file 1 = next to the stele, the "
                          "outermost files hold the epidermis (the pattern tissue: cortex + epidermis). A cell's file = the "
                          "median of its numbers on rays every 0.5 degrees in the kept angles, gap-aware",
-    "Cells per file": "the number of cells behind each mean in 'Cell area by file': few cells = a noisy mean",
+    "Cells per file": "cells in each file, all the way round: blank unless the whole section is kept (360 degrees), "
+                      f"and blank for outer files that do not go all round (more than {P.FILE_COMPLETE_PCT}% of rays "
+                      "end before them)",
 }
 
 
-def trait_rows(meta, status, s, region, props, mxp, tr, st, centre, arcs, lac, lmask, cells):
+def trait_rows(meta, status, s, region, props, mxp, tr, st, centre, arcs, lac, lmask, cells, ray_files=()):
     """(per-image row, per-quarter rows, file-area row, file-count row) for traits_DATE.xlsx. props: after
-    exclude_sectors, with the file column."""
+    exclude_sectors, with the file column; ray_files: cell_files(...).attrs["ray_files"]. Cells per file: only with
+    the whole section kept (360 degrees), and only the files that go all round (P.complete_files)."""
     um2, um = s * s, s
     stele = float((region == 2).sum())
     found = bool(st["stele_found"])
@@ -486,7 +489,10 @@ def trait_rows(meta, status, s, region, props, mxp, tr, st, centre, arcs, lac, l
     g = c.area_px.groupby(k).agg(["mean", "size"])
     g = g.reindex(range(1, int(g.index.max()) + 1)) if len(g) else g
     farea = {**meta, **{f"file_{i}": v * um2 for i, v in g["mean"].items()}}
-    fn = {**meta, **{f"file_{i}": int(0 if pd.isna(v) else v) for i, v in g["size"].items()}}
+    whole_ring = st["angle_kept_deg"] >= 360 - 1e-6
+    n_full = P.complete_files(ray_files)
+    fn = {**meta, **{f"file_{i}": (int(0 if pd.isna(v) else v) if whole_ring and i <= n_full else np.nan)
+                     for i, v in g["size"].items()}}
     return img, qrows, farea, fn
 
 
@@ -756,7 +762,7 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
         whole = {k: tr[k] for k in ("root_area_px", "root_diameter_eq_px", "stele_area_px", "mx_n", "mx_mean_area_px",
                                     "mx_total_area_px")}
 
-        fl = P.cell_files(cells, props, centre, arcs, region=region)
+        fl = P.cell_files(cells, props, centre, arcs)
         props = props.join(fl, on="label")
         props["quarter"] = P.quarter_of(np.degrees(props.angle_rad))
         c_all = props[props.tissue.isin(P.PATTERN_TISSUES)]          # rel reference: the tissue median
@@ -809,7 +815,8 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
                                               drawn=drawn, mask=True)
         lt = P.lacuna_traits(lac, n_gaps, st["cortex_area_kept_px"])
         ti, tq, tfa, tfn = trait_rows({"image_file": rel, **{g: samples.at[rel, g] for g in groups}}, status, s,
-                                      region, props, mxp, tr, st, centre, arcs, lac, lmask, cells)
+                                      region, props, mxp, tr, st, centre, arcs, lac, lmask, cells,
+                                      fl.attrs["ray_files"])
         t_img.append(ti)
         t_q += tq
         t_fa.append(tfa)

@@ -278,3 +278,25 @@ Rooh started on 2026-10-27 as `cross_section_anatomy`, was briefly renamed JadNa
 - **Evidence:** no number changed. tests/check_numbers.py T9 (plain run: no full/, top = the three outputs + methods,
   an old-layout workbook from today and an earlier traits file moved to earlier_runs/); 292 pass.
 - **Re-run:** not needed.
+
+## 2026-11-11 · Cell files: no gap at the stele; Cells per file only for whole rings
+
+- **Decision:** (1) `cell_files` no longer counts a gap between the stele edge and the first cell as cells (the rule
+  `ccfn` got on 2026-11-10); numbering starts at the first cell present. A gap between cells (lacuna, missed cell)
+  still counts. (2) `Cells per file` (traits) is filled only when the whole section is kept (360°), and (3) only for
+  files that go all round: files up to the 10th percentile of the files per kept ray (`complete_files`,
+  `FILE_COMPLETE_PCT = 10`). `Cell area by file` keeps every file.
+- **Why:** (1) On Hallie's A6_5_1 (stele outline drawn too small) the gap made 26 files with cells vs ccfn 11; the
+  per-cell file number and ccfn now follow one rule. (2) A count over part of a section scales with the angle kept.
+  (3) The number of files varies around a real root; outer files only some rays reach mix layers (thin sides: the
+  epidermis), so their counts are not rings.
+- **Evidence:** `file_rings.py` → `file_rings.csv` on examples/hallie_SL-2026-004: counted files median 100% of rays
+  reaching them, 0% epidermis cells; cut files 26% and 27%. P10_1_2: files 1-5 counted (40, 35, 40, 37, 42 cells);
+  before, files 1-13 (… 46, 41, 22, 12, 3, 0, 1), with files 7-10 holding 17-29% epidermis cells. A6_5_1: 26 → 20
+  files with a mean area (the rest is the bad mask: redraw its stele). Setaria (2-4 cortical files): the epidermis
+  mixes in from file 2-3, so only 2-4 files are counted and those counts are fragile.
+  check_numbers: T5b (gap at the stele: 7 × 36 + 72, no phantom file), T4 (partial: blank), T4b (epidermis gone over
+  60°: files 1-8 counted, file 9 blank, its area kept); the 2026-11-04 "inner file gone: keeps its number" check is
+  reversed. 299 pass.
+- **Re-run:** Make results on every project (per-cell `file`, `file_rel`, Cell area by file, Cells per file, the
+  cortex pattern by file change where the stele outline sits off the first cell).

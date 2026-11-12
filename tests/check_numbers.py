@@ -215,7 +215,7 @@ def run(out_dir: Path):
             c[region_cut], rg[region_cut] = 0, 0
         ctr = P.centre_of(rg, None)
         pr, _, _ = P.derive(c, rg, m, 0, ctr)
-        fl = P.cell_files(c, pr, ctr, region=rg)
+        fl = P.cell_files(c, pr, ctr)
         pr = pr.join(fl, on="label")
         pr["true_layer"] = np.searchsorted(EDGES, np.hypot(pr.y - C[0], pr.x - C[1]), side="right")
         return pr
@@ -223,8 +223,8 @@ def run(out_dir: Path):
     check("loss", "inner file gone all round: cortex still found (was: all 'unassigned')",
           int((pr.tissue == "cortex").sum()), 7 * SECT)
     k = pr[pr.tissue.isin(["cortex", "epidermis"])]
-    check("loss", "inner file gone: every cell keeps its file number (gap at the stele counted)",
-          float((np.floor(k.file + 0.5) == k.true_layer).mean()), 1.0)
+    check("loss", "inner file gone: numbering starts at the first cell present (gap at the stele not counted, "
+          "2026-11-11)", float((np.floor(k.file + 0.5) == k.true_layer - 1).mean()), 1.0)
     pr = files_after((RR >= EDGES[3]) & (RR < EDGES[5]) & ((TH // 10) % 3 == 0))
     k = pr[pr.tissue.isin(["cortex", "epidermis"]) & (pr.true_layer >= 6)]
     check("loss", "aerenchyma (layers 4-5 gone, every 3rd sector): cells outside keep their file number",
@@ -691,6 +691,26 @@ def traits_checks(out_dir: Path, base: Path, gray):
     check("T4_partial_quarter", "Q1 n_lacunae blank (not 90 deg)", bool(pd.isna(q.loc["Q1", "n_lacunae"])), True)
     check("T4_partial_quarter", "Q2 cortex_area = a quarter annulus", float(q.loc["Q2", "cortex_area_um2"]),
           np.pi * (R_ROOT ** 2 - R_STELE ** 2) / 4 * A, .005)
+    t4 = traits(out_dir / "T4_partial_quarter")
+    fn = t4["Cells per file"].set_index("image_file").loc["S.tif"]
+    check("T4_partial_quarter", "cells per file blank (not 360 deg kept)",
+          bool(fn[[c for c in fn.index if c.startswith("file_")]].isna().all()), True)
+    fa = t4["Cell area by file"].set_index("image_file").loc["S.tif"]
+    check("T4_partial_quarter", "cell area by file still there", float(fa["file_1"]), CELL_AREA[0] * A, .03)
+
+    # T4b: the epidermis gone over 0-60 deg (a file that does not go all the way round): the outermost file exists on
+    # 5/6 of the rays, under 100 - FILE_COMPLETE_PCT %: its count is blank, its mean area stays
+    def t4b(npz, c, rg, m):
+        c[np.isin(c, [int(c[at((EDGES[-1] + R_EPI) / 2, d)]) for d in np.arange(2.5, 60, 5)])] = 0
+        P.save_edit(npz, cells=c)
+    tedit("T4b_incomplete_file", t4b)
+    t4 = traits(out_dir / "T4b_incomplete_file")
+    fn = t4["Cells per file"].set_index("image_file").loc["S.tif"]
+    check("T4b_incomplete_file", "files 1-8 counted (complete rings), 36 each",
+          ",".join(str(int(fn[f"file_{k}"])) for k in range(1, 9)), ",".join(["36"] * 8))
+    check("T4b_incomplete_file", "file 9 (not all round) count blank", bool(pd.isna(fn["file_9"])), True)
+    fa = t4["Cell area by file"].set_index("image_file").loc["S.tif"]
+    check("T4b_incomplete_file", "file 9 mean area kept", float(fa["file_9"]), EPI_AREA * A, .03)
 
     # T5: aerenchyma in Q1: layer-5 cells over 0-60 deg gone (one lacuna). Cells present on those rays: 7; gap-aware
     # ccfn: 8 on every ray (the lacuna counts as the cell it replaced)
@@ -718,6 +738,14 @@ def traits_checks(out_dir: Path, base: Path, gray):
                                         P.save_edit(npz, cells=c)))
     check("T5b_gap_at_stele_not_counted", "image ccfn 7", float(i.ccfn), 7.0)
     check("T5b_gap_at_stele_not_counted", "= cells present", float(q.ccfn_cells_present.mean()), 7.0)
+    # ... and the file numbers do not count it either (2026-11-11): layer 2 is file 1, the epidermis file 8
+    tb = traits(out_dir / "T5b_gap_at_stele_not_counted")
+    fn = tb["Cells per file"].set_index("image_file").loc["S.tif"]
+    check("T5b_gap_at_stele_not_counted", "cells per file: 7 x 36 then the epidermis 72, no phantom file",
+          ",".join(str(int(fn[f"file_{k}"])) for k in range(1, 9)) + (",+" if "file_9" in fn and pd.notna(fn["file_9"])
+                                                                     else ""), "36,36,36,36,36,36,36,72")
+    fa = tb["Cell area by file"].set_index("image_file").loc["S.tif"]
+    check("T5b_gap_at_stele_not_counted", "file 1 = layer 2's cells", float(fa["file_1"]), CELL_AREA[1] * A, .03)
 
     # T6: no stele: root size stays, every stele / cortex / metaxylem number blank (never 0)
     def t6(npz, c, rg, m):

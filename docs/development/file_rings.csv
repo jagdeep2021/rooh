@@ -1,0 +1,116 @@
+image,file,rays_reaching,cells,epidermis_share,counted
+Maize__shr double__P10_1_2,1,1.0,40,0.0,True
+Maize__shr double__P10_1_2,2,1.0,35,0.0,True
+Maize__shr double__P10_1_2,3,1.0,40,0.0,True
+Maize__shr double__P10_1_2,4,0.982,37,0.027,True
+Maize__shr double__P10_1_2,5,0.919,42,0.0,True
+Maize__shr double__P10_1_2,6,0.831,42,0.024,False
+Maize__shr double__P10_1_2,7,0.711,46,0.174,False
+Maize__shr double__P10_1_2,8,0.51,40,0.2,False
+Maize__shr double__P10_1_2,9,0.311,20,0.2,False
+Maize__shr double__P10_1_2,10,0.149,14,0.286,False
+Maize__shr double__P10_1_2,11,0.074,1,0.0,False
+Maize__shr double__P10_1_2,12,0.036,0,,False
+Maize__shr double__P10_1_2,13,0.022,1,0.0,False
+Maize__shr double__P10_2_1,1,1.0,48,0.0,True
+Maize__shr double__P10_2_1,2,1.0,41,0.0,True
+Maize__shr double__P10_2_1,3,1.0,39,0.0,True
+Maize__shr double__P10_2_1,4,0.989,46,0.0,True
+Maize__shr double__P10_2_1,5,0.965,39,0.0,True
+Maize__shr double__P10_2_1,6,0.944,45,0.067,True
+Maize__shr double__P10_2_1,7,0.883,55,0.036,False
+Maize__shr double__P10_2_1,8,0.814,68,0.294,False
+Maize__shr double__P10_2_1,9,0.632,75,0.52,False
+Maize__shr double__P10_2_1,10,0.401,40,0.625,False
+Maize__shr double__P10_2_1,11,0.247,26,0.577,False
+Maize__shr double__P10_2_1,12,0.119,14,0.643,False
+Maize__shr double__P10_2_1,13,0.051,1,1.0,False
+Maize__shr double__P10_2_1,14,0.019,1,1.0,False
+Maize__shr double__P10_5_3,1,1.0,38,0.0,True
+Maize__shr double__P10_5_3,2,1.0,36,0.0,True
+Maize__shr double__P10_5_3,3,1.0,35,0.0,True
+Maize__shr double__P10_5_3,4,0.981,34,0.029,True
+Maize__shr double__P10_5_3,5,0.928,43,0.14,True
+Maize__shr double__P10_5_3,6,0.799,34,0.147,False
+Maize__shr double__P10_5_3,7,0.66,45,0.111,False
+Maize__shr double__P10_5_3,8,0.557,35,0.114,False
+Maize__shr double__P10_5_3,9,0.431,42,0.286,False
+Maize__shr double__P10_5_3,10,0.279,26,0.231,False
+Maize__shr double__P10_5_3,11,0.143,9,0.444,False
+Maize__shr double__P10_5_3,12,0.075,7,0.143,False
+Maize__shr double__P10_5_3,13,0.037,3,0.333,False
+Maize__sibs__A5_3_8,1,1.0,35,0.0,True
+Maize__sibs__A5_3_8,2,1.0,33,0.0,True
+Maize__sibs__A5_3_8,3,1.0,34,0.0,True
+Maize__sibs__A5_3_8,4,1.0,41,0.0,True
+Maize__sibs__A5_3_8,5,1.0,44,0.0,True
+Maize__sibs__A5_3_8,6,0.986,51,0.0,True
+Maize__sibs__A5_3_8,7,0.896,55,0.0,False
+Maize__sibs__A5_3_8,8,0.674,54,0.111,False
+Maize__sibs__A5_3_8,9,0.403,35,0.2,False
+Maize__sibs__A5_3_8,10,0.233,14,0.214,False
+Maize__sibs__A5_3_8,11,0.117,8,0.125,False
+Maize__sibs__A5_3_8,12,0.05,1,1.0,False
+Maize__sibs__A6_1,1,1.0,31,0.0,True
+Maize__sibs__A6_1,2,1.0,35,0.0,True
+Maize__sibs__A6_1,3,1.0,34,0.0,True
+Maize__sibs__A6_1,4,0.992,37,0.0,True
+Maize__sibs__A6_1,5,0.96,39,0.0,True
+Maize__sibs__A6_1,6,0.868,42,0.0,False
+Maize__sibs__A6_1,7,0.736,45,0.0,False
+Maize__sibs__A6_1,8,0.556,34,0.0,False
+Maize__sibs__A6_1,9,0.362,35,0.057,False
+Maize__sibs__A6_1,10,0.207,14,0.071,False
+Maize__sibs__A6_1,11,0.107,4,0.5,False
+Maize__sibs__A6_1,12,0.047,1,0.0,False
+Maize__sibs__A6_5_1,1,1.0,48,0.0,True
+Maize__sibs__A6_5_1,2,1.0,48,0.0,True
+Maize__sibs__A6_5_1,3,1.0,50,0.0,True
+Maize__sibs__A6_5_1,4,1.0,53,0.0,True
+Maize__sibs__A6_5_1,5,1.0,51,0.0,True
+Maize__sibs__A6_5_1,6,1.0,55,0.018,True
+Maize__sibs__A6_5_1,7,0.986,48,0.042,True
+Maize__sibs__A6_5_1,8,0.957,53,0.189,True
+Maize__sibs__A6_5_1,9,0.86,55,0.236,False
+Maize__sibs__A6_5_1,10,0.719,47,0.277,False
+Maize__sibs__A6_5_1,11,0.574,42,0.238,False
+Maize__sibs__A6_5_1,12,0.436,20,0.25,False
+Maize__sibs__A6_5_1,13,0.325,17,0.294,False
+Maize__sibs__A6_5_1,14,0.242,15,0.267,False
+Maize__sibs__A6_5_1,15,0.176,14,0.429,False
+Maize__sibs__A6_5_1,16,0.122,12,0.667,False
+Maize__sibs__A6_5_1,17,0.082,5,0.4,False
+Maize__sibs__A6_5_1,18,0.05,3,0.667,False
+Maize__sibs__A6_5_1,19,0.031,2,0.0,False
+Maize__sibs__A6_5_1,20,0.021,0,,False
+Maize__sibs__A6_5_1,21,0.017,1,1.0,False
+Setaria__SvSHR1-2 K.O__plant1,1,1.0,21,0.0,True
+Setaria__SvSHR1-2 K.O__plant1,2,1.0,22,0.091,True
+Setaria__SvSHR1-2 K.O__plant1,3,0.89,26,0.154,False
+Setaria__SvSHR1-2 K.O__plant1,4,0.639,19,0.316,False
+Setaria__SvSHR1-2 K.O__plant1,5,0.299,5,0.8,False
+Setaria__SvSHR1-2 K.O__plant1,6,0.097,4,0.75,False
+Setaria__SvSHR1-2 K.O__plant7,1,1.0,20,0.0,True
+Setaria__SvSHR1-2 K.O__plant7,2,1.0,25,0.0,True
+Setaria__SvSHR1-2 K.O__plant7,3,0.936,26,0.423,True
+Setaria__SvSHR1-2 K.O__plant7,4,0.5,9,0.778,False
+Setaria__SvSHR1-2 K.O__plant7,5,0.182,4,0.75,False
+Setaria__SvSHR1-2 K.O__plant7,6,0.051,1,1.0,False
+Setaria__wt__p1,1,1.0,15,0.0,True
+Setaria__wt__p1,2,1.0,14,0.0,True
+Setaria__wt__p1,3,1.0,17,0.118,True
+Setaria__wt__p1,4,0.894,22,0.5,False
+Setaria__wt__p1,5,0.642,19,0.632,False
+Setaria__wt__p1,6,0.314,9,0.778,False
+Setaria__wt__p1,7,0.15,2,1.0,False
+Setaria__wt__p1,8,0.075,3,0.667,False
+Setaria__wt__p1,9,0.036,1,0.0,False
+Setaria__wt__p9,1,1.0,16,0.0,True
+Setaria__wt__p9,2,1.0,14,0.0,True
+Setaria__wt__p9,3,1.0,14,0.0,True
+Setaria__wt__p9,4,0.96,21,0.0,True
+Setaria__wt__p9,5,0.746,24,0.125,False
+Setaria__wt__p9,6,0.297,6,0.167,False
+Setaria__wt__p9,7,0.14,4,0.25,False
+Setaria__wt__p9,8,0.043,0,,False
+Setaria__wt__p9,9,0.025,1,1.0,False
