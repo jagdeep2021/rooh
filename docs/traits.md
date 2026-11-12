@@ -63,7 +63,10 @@ sheets. Every image measured and not set to `include = no` is in every file; `ST
 **Check sheet** (traits): one row per image, `flags` = plain reasons to look before using it (not reviewed, no
 scale, no stele, blank quarters, root area not estimated, gaps add cell files ≥ 2 in a quarter, giant cortex cells,
 missed-cell gaps, epidermis mostly missing, lacunae overruled by hand), plus the counts behind them
-(`n_giant_cortex_cells`, `n_gaps_missed_cell`, `epidermis_deg`, `n_lacunae_overridden`, as in section 2).
+(`n_giant_cortex_cells`, `n_gaps_missed_cell`, `epidermis_deg`, `n_lacunae_overridden`, as in section 2), and
+`frame_deg`: kept degrees where the root runs off the image (flag "root runs off the image"). The edge there is the
+frame: root area is short; width barely moves (those are the widest degrees of an oval root; leaving them out biases
+width low too: median −0.6%, worst −2.8% on Hallie's 38 reviewed images), so width keeps them.
 
 **cortex_pattern** (the curves, quarter rules as below; position basis, relative size):
 - `Curve features`: per image × quarter (+ `image` = the mean of the quarters; its `kept_deg` and `n_cells` are the
@@ -94,6 +97,7 @@ are kept**. Nothing per quarter is estimated. Per-image cortex traits = the mean
 | `root_area_um2` | Pixels inside the root outline as drawn (where an arc is excluded the outline may follow the damage). |
 | `root_area_est_um2` | **Fill the edge**: kept angles counted pixel by pixel; across each excluded arc the root radius (from the centre, 0.25° steps) is interpolated linearly between the kept radii on either side, and the wedge adds ½ (r + 0.5)² Δθ. Equals `root_area_um2` when nothing is excluded. Blank under 180° kept. (Tested against scaling by angle: `docs/development/area_estimate.py`.) |
 | `root_diameter_um` | 2√(`root_area_est` / π). |
+| `root_aspect` | Long / short axis of the root outline (main piece; the ellipse with the same second moments). 1 = round. An oval root and a section cut at a slant look the same in one section: descriptive, not a correction (2026-11-12: 23 of Hallie's 38 reviewed roots ≥ 1.15; within a plant, cell area did not follow it, slope +0.22, 95% CI −0.59 to 1.03, *n* = 33 images in 16 plants: inconclusive). |
 | `stele_area_um2` | Whole section. |
 | `cortex_area_kept_um2` | Root outside the stele, kept angles only: measured. |
 | `cortex_area_est_um2` | `root_area_est` − stele. |
@@ -112,7 +116,7 @@ are kept**. Nothing per quarter is estimated. Per-image cortex traits = the mean
 | `ccfn` | **Gap-aware CCFN**: on each 5° ray (as `n_cortical_layers`), the file number of the outermost cortical cell, where a gap **between cortical cells** on the ray (lacuna, missed cell) counts as the cells it would hold, round(gap / the neighbouring cells' length on the ray) (the `cell_files` rule). A gap between the stele edge and the first cell is not counted (nor in `cell_files` since 2026-11-11): on the shipped examples it came from stele outlines drawn too small or cortex pulled away, never lost cells. Median over the quarter's kept rays. |
 | `ccfn_cells_present` | The same rays counting only the cells present (the `n_cortical_layers` rule). `ccfn` = this + the files in gaps; far above it with no aerenchyma = cells Cellpose missed. |
 | `n_rays` | Rays behind `ccfn`. |
-| `cortex_width_um` | Mean (root radius − stele radius) over the quarter's kept degrees. |
+| `cortex_width_um` | Mean (root radius − stele radius) over the quarter's kept degrees, along lines from the centre (1° steps). Includes the epidermis (cortex = root − stele, as RootScan). Width varies around a real root (coefficient of variation 3–25% on Hallie's reviewed images): the mean hides an oval. |
 | `median_cortex_cell_area_um2` | Median area of the kept cortical cells (centre in the quarter). |
 | `aerenchyma_share` | Lacuna pixels / root-outside-stele pixels, kept angles of the quarter. |
 | `cortex_area_um2`, `lacuna_area_um2` | Root-outside-stele and lacuna pixels in the quarter; whole quarter kept only. |
