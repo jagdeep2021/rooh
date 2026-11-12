@@ -195,7 +195,7 @@ def _safe_rel(rel: str) -> PurePosixPath:
 def _images(d: Path) -> list[dict]:
     """Every uploaded image, measured or not, with its status."""
     out = []
-    for rel in RB.list_images(_raw(d)):
+    for rel in RB.list_images(_raw(d), RB.removed(d / "anatomy")):
         key = RB.image_key(rel)
         npz = d / "anatomy" / "masks" / f"{key}.npz"
         out.append({"image": rel.as_posix(), "key": key,
@@ -240,7 +240,7 @@ def queue_measure(d: Path) -> dict:
     job = JOBS.get(str(d))
     if job and job["state"] in ("queued", "running"):
         return job
-    JOBS[str(d)] = {"state": "queued", "i": 0, "n": len(RB.list_images(_raw(d))), "line": "Waiting for the GPU...",
+    JOBS[str(d)] = {"state": "queued", "i": 0, "n": len(RB.list_images(_raw(d), RB.removed(d / "anatomy"))), "line": "Waiting for the GPU...",
                     "ahead": WORK.qsize()}
     WORK.put(d)
     return JOBS[str(d)]
@@ -583,6 +583,87 @@ def upload(name: str, files: list[UploadFile] = File(...), u: dict = Depends(use
     return {"saved": len(saved), "skipped": len(files) - len(saved)}
 
 
+@app.delete("/api/projects/{name}/images")
+def delete_image(name: str, rel: str, u: dict = Depends(user)):
+    """Takes one image out of the project, with its masks and its samples.xlsx row. Web: the image and masks move to
+    the volume's trash/ (an admin can restore them). This computer: nothing is deleted: the image is listed in
+    settings.json "removed" and its masks move to anatomy/removed/."""
+    import pandas as pd
+    d = _project(u, name)
+    if JOBS.get(str(d), {}).get("state") in ("queued", "running"):
+        raise HTTPException(400, "This project is being measured: wait until it finishes.")
+    rel = _safe_rel(rel).as_posix()
+    img, anat = _raw(d) / rel, d / "anatomy"
+    if not img.is_file():
+        raise HTTPException(404, f"No image {rel}")
+    key = RB.image_key(Path(rel))
+    moved = [p for p in (anat / "masks" / f"{key}.npz", anat / "qc" / f"{key}.png") if p.exists()]
+    if LOCAL["on"]:
+        dest = anat / "removed"
+        sj = anat / "settings.json"
+        st = json.loads(sj.read_text()) if sj.exists() else {}
+        st["removed"] = sorted(set(st.get("removed", [])) | {rel})
+        sj.write_text(json.dumps(st, indent=2))
+    else:
+        dest = DATA / "trash" / d.parent.name / f"{d.name}_image_{time.strftime('%Y-%m-%d_%H%M%S')}"
+        moved.append(img)
+    for p in moved:
+        to = dest / (Path("raw") / rel if p == img else p.relative_to(anat))
+        to.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(p), to)
+    sf = anat / "samples.xlsx"
+    if sf.exists():
+        s = pd.read_excel(sf, dtype={"image_file": str, "plant": str})
+        if "image_file" in s and (s.image_file == rel).any():
+            s[s.image_file != rel].to_excel(sf, index=False)
+    return {"ok": True}
+
+
+@app.post("/api/projects/import")
+def import_project(file: UploadFile = File(...), u: dict = Depends(user)):
+    """A whole-project zip (Download whole project) back in as a new project: images, masks, settings, samples and
+    results as they were. Only raw/, anatomy/ (not qc/) and results/ are taken; the images are read from raw/."""
+    import tempfile
+    if LOCAL["on"]:
+        raise HTTPException(400, "On this computer, unzip it and use Open folder…")
+    with tempfile.TemporaryFile() as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        try:
+            z = zipfile.ZipFile(tmp)
+        except zipfile.BadZipFile:
+            raise HTTPException(400, "That is not a zip file.")
+        names = [n for n in z.namelist() if not n.endswith("/")]
+        tops = {n.split("/")[0] for n in names}
+        strip = len(tops) == 1 and not {"raw", "anatomy", "results"} & tops    # <project>/raw/... -> raw/...
+        base = Path(file.filename or "project").stem.removesuffix("_project")
+        stem = _slug(next(iter(tops)) if strip else base)
+        d, k = project_dir(u, stem), 2
+        while d.exists():
+            d, k = project_dir(u, f"{stem}_{k}"), k + 1
+        n_img = 0
+        for n in names:
+            rel = _safe_rel(n.split("/", 1)[1] if strip else n)
+            top = rel.parts[0]
+            if top not in ("raw", "anatomy", "results") or (top == "anatomy" and "qc" in rel.parts[1:2]):
+                continue
+            dest = d / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            with z.open(n) as src, open(dest, "wb") as out:
+                shutil.copyfileobj(src, out)
+            n_img += top == "raw" and rel.suffix.lower() in P.IMAGE_EXT
+    if not n_img:
+        shutil.rmtree(d, ignore_errors=True)
+        raise HTTPException(400, "No images in raw/ in that zip: use the zip from Download whole project.")
+    sj = d / "anatomy" / "settings.json"
+    if sj.exists():                                  # images always in raw/ on the web
+        st = json.loads(sj.read_text())
+        st["image_dir"] = "../raw"
+        st.pop("removed", None)
+        sj.write_text(json.dumps(st, indent=2))
+    (d / "raw").mkdir(parents=True, exist_ok=True)
+    return {"name": d.name, "images": n_img}
+
+
 @app.get("/api/projects/{name}")
 def project(name: str, u: dict = Depends(user)):
     d = _project(u, name)
@@ -595,15 +676,15 @@ def project(name: str, u: dict = Depends(user)):
     for im in imgs:
         im["um_per_px"] = scale.get(im["image"])
     results = _result_files(d)
-    figs = d / "results" / "figures"
+    figs = d / "results" / "um" / "figures"
     figures = sorted(p.relative_to(figs).as_posix() for p in figs.rglob("*.png")) if figs.exists() else []
     return {"name": d.name, "images": imgs, "job": JOBS.get(str(d)), "results": results, "figures": figures}
 
 
 @app.get("/api/projects/{name}/figure")
 def figure(name: str, path: str, u: dict = Depends(user)):
-    """One figure from Make results (results/figures/...): group figures, and cortex_pattern/<image>.png per image."""
-    f = _project(u, name) / "results" / "figures" / _safe_rel(path)
+    """One figure from Make results (results/um/figures/...): group figures, and cortex_pattern/<image>.png per image."""
+    f = _project(u, name) / "results" / "um" / "figures" / _safe_rel(path)
     if f.suffix != ".png" or not f.is_file():
         raise HTTPException(404, "No such figure: click Make results first.")
     return FileResponse(f, headers={"Cache-Control": "no-store"})
@@ -784,7 +865,8 @@ def reviewed(name: str, rel: str = Form(...), u: dict = Depends(user)):
 @app.post("/api/projects/{name}/scale")
 def set_scale(name: str, um_per_px: float = Form(...), group: str = Form(""), rel: str = Form(""),
               u: dict = Depends(user)):
-    """Scale for one image (rel) or every image whose first folder is group ('' = all images)."""
+    """Scale for one image (rel) or every image whose first folder is group ('' = all images, and the project's scale:
+    images added later take it too)."""
     import pandas as pd
     d = _project(u, name)
     if not any((d / "anatomy" / "masks").glob("*.npz")):
@@ -798,12 +880,20 @@ def set_scale(name: str, um_per_px: float = Form(...), group: str = Form(""), re
     rows = (s.image_file == rel) if rel else (s.image_file.str.split("/").str[0] == group) if group else s.image_file.notna()
     s.loc[rows, "um_per_px"] = um_per_px if um_per_px > 0 else np.nan
     s.to_excel(f, index=False)
+    if not rel and not group:            # "All": the project's scale; images added later take it (summarise.write_samples)
+        sj = d / "anatomy" / "settings.json"
+        st = json.loads(sj.read_text()) if sj.exists() else {}
+        if um_per_px > 0:
+            st["um_per_px"] = um_per_px
+        else:
+            st.pop("um_per_px", None)
+        sj.write_text(json.dumps(st, indent=2))
     return {"set": int(rows.sum())}
 
 
 def _result_files(d: Path) -> list:
-    """The current run's outputs (top of results/; full/ and earlier_runs/ are not listed)."""
-    r = d / "results"
+    """The current run's tables (results/um/; the same in pixels sit in results/px/)."""
+    r = d / "results" / "um"
     return sorted(p.name for p in r.iterdir() if p.suffix in (".xlsx", ".csv")) if r.exists() else []
 
 

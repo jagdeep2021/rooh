@@ -18,15 +18,16 @@ import pandas as pd
 ETA = 1.002e-9          # water at 20 C, MPa s
 proj = Path(sys.argv[1])
 anat, res = proj / "anatomy", proj / "results"
-traits_f = sorted(res.glob("traits_*.xlsx"))[-1]
+um = res / "um"                 # results layout since 2026-11-12: um/, px/, masks/
+traits_f = sorted(um.glob("traits_*.xlsx"))[-1]
 day = traits_f.stem.split("_", 1)[1]
 img = pd.read_excel(traits_f, "Per image", dtype={"image_file": str})
 qrt = pd.read_excel(traits_f, "Per quarter", dtype={"image_file": str})
-cells_csv = pd.read_csv(res / f"all_cells_{day}.csv", dtype={"image_file": str})
-cortex_csv = pd.read_csv(res / f"cortex_cells_{day}.csv", dtype={"image_file": str})
+cells_csv = pd.read_csv(um / f"all_cells_{day}.csv", dtype={"image_file": str})
+cortex_csv = pd.read_csv(um / f"cortex_cells_{day}.csv", dtype={"image_file": str})
 samples = pd.read_excel(anat / "samples.xlsx", dtype={"image_file": str}).set_index("image_file")
 chk = pd.read_excel(traits_f, "Check", dtype={"image_file": str}).set_index("image_file")
-prof = pd.read_excel(sorted(res.glob("cortex_pattern_*.xlsx"))[-1], "Profile", dtype={"image_file": str, "bin": int})
+prof = pd.read_excel(sorted(um.glob("cortex_pattern_*.xlsx"))[-1], "Curves", dtype={"image_file": str, "bin": int})
 full = sorted((res / "full").glob("anatomy_summary_*.xlsx")) if (res / "full").exists() else []
 lac = pd.read_excel(full[-1], "lacunae", dtype={"image_file": str}) if full else pd.DataFrame(columns=["image_file"])
 rows = []
@@ -186,8 +187,9 @@ for _, row in img.iterrows():
                 continue
             b = (np.clip(g.r_norm, 0, 0.999) * 10).astype(int) + 1
             med = g.area_um2.groupby(b).median()
-            diff = max((abs(pr.median_area_um2.get(k, np.nan) - v) for k, v in med.items()), default=0)
-            check(rel, f"{qn} pattern: median area per r_norm bin (max diff µm²)", diff, 0, tol=1e-6, rel=False)
+            for col, v in (("median", med), ("mean", g.area_um2.groupby(b).mean()), ("sd", g.area_um2.groupby(b).std())):
+                diff = max((abs(pr[f"{col}_area_um2"].get(k, np.nan) - x) for k, x in v.items() if not np.isnan(x)), default=0)
+                check(rel, f"{qn} Curves: {col} area per r_norm bin (max diff µm²)", diff, 0, tol=1e-6, rel=False)
         # lacunae: area, angle, quarter, radial position of each
         for _, L in lac[lac.image_file == rel].iterrows():
             a = np.degrees(np.arctan2(-(L.y - cy), L.x - cx)) % 360

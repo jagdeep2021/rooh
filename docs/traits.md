@@ -42,20 +42,27 @@ explains how they came about.
 
 ---
 
-## What Make results writes (since 2026-11-10)
+## What Make results writes (since 2026-11-12)
 
 ```
 results/
-  traits_DATE.xlsx          START_HERE, README, Check, Per image, Per quarter, Cell area by file, Cells per file
-  cortex_pattern_DATE.xlsx  Curve features, Profile, Fitted curves, Aerenchyma by position
-  cortex_cells_DATE.csv     one row per kept cortical cell
-  all_cells_DATE.csv        one row per object, every tissue, kept yes/no
+  um/                       the numbers in µm (images without a scale: blank µm columns)
+    traits_DATE.xlsx          START_HERE, README, Check, Per image, Per quarter, Cell area by file, Cells per file
+    cortex_pattern_DATE.xlsx  Curves, Curve features, Aerenchyma by position
+    cortex_cells_DATE.csv     one row per kept cortical cell
+    all_cells_DATE.csv        one row per object, every tissue, kept yes/no
+    figures/
+  px/                       the same files in pixels (_px, _px2 columns; no conductance)
+  masks/<image>.tif         4 channels: cells (ids = `cell` in the CSVs), vessels, tissue (1 epidermis, 2 cortex,
+                            3 stele, 4 metaxylem, 5 air space, 6 unassigned, 7 lacuna), outlines (1 root, 2 stele)
   methods_DATE.txt
-  figures/
-  earlier_runs/             earlier results, and any old-layout workbook (moved here, never deleted)
   full/                     only with `summarise.py --full`: anatomy_summary, all_cells.xlsx, cortex_pattern_full,
                             every intermediate table (the checks and compare.py read these; sections 1-7 below)
 ```
+
+Each run replaces the last: files Rooh wrote earlier (any date, old layouts, `earlier_runs/`) are deleted; files
+Rooh did not write stay. Graphs from the Curves sheet: `R/plot_curves.R` (plant means, then mean ± SE over plants),
+with an optional design file (image_file + genotype, treatment …) joined on the image's file name.
 
 Per image and per quarter only, never per plant: the user joins plant, treatment and anything else on `image_file`
 later. Every row carries `image_file` and the grouping columns from `samples.xlsx`; no other column repeats across
@@ -76,8 +83,11 @@ round lumens, kept as drawn (flag "drawn vessel(s) with two lumens, kept as draw
 - `Curve features`: per image × quarter (+ `image` = the mean of the quarters; its `kept_deg` and `n_cells` are the
   sums): `peak_height`, `peak_pos`, `rise_slope`, `decay_slope`, `outer_rise` of the smoothing spline through the bin
   medians, relative to the image's median cell (section 6). Quarters under 45° kept: a blank row.
-- `Profile`: per image × quarter × bin (10 equal r_norm bins): `n_cells`, `median_area_um2`, `rel`, `few_cells`.
-- `Fitted curves`: the spline at r_norm 0, 0.05 … 1 (`fitted`), per image × quarter: the input for fPCA.
+- `Curves`: per image × quarter × bin (10 equal r_norm bins; `r_norm` = the bin centre): `n_cells`,
+  `mean_area_um2`, `median_area_um2`, `sd_area_um2` (cortex + epidermis, kept cells), then on every row that
+  quarter's `ccfn`, `cortex_width_um`, `median_cortex_cell_area_um2`, `file1_cell_area_um2`, `aerenchyma_share` and
+  the image's `root_diameter_um`, `stele_diameter_um`, `stele_area_um2`, `mx_n`, `mx_area_mean_um2`,
+  `axial_conductance_m4_MPa_s`, with `plant` and the samples.xlsx groups. The data to draw and model curves from.
 - `Aerenchyma by position`: per image × bin, `lacuna_share` (kept angles).
 The file and distance bases, `_abs`, `_rel_cortex` and whole-section fits are in `full/cortex_pattern_full` (`--full` only).
 
@@ -123,6 +133,7 @@ are kept**. Nothing per quarter is estimated. Per-image cortex traits = the mean
 | `n_rays` | Rays behind `ccfn`. |
 | `cortex_width_um` | Mean (root radius − stele radius) over the quarter's kept degrees, along lines from the centre (1° steps). Includes the epidermis (cortex = root − stele, as RootScan). Width varies around a real root (coefficient of variation 3–25% on Hallie's reviewed images): the mean hides an oval. |
 | `median_cortex_cell_area_um2` | Median area of the kept cortical cells (centre in the quarter). |
+| `file1_cell_area_um2` | Mean area of the kept cells in cell file 1 (the innermost cortical file, next to the endodermis). |
 | `aerenchyma_share` | Lacuna pixels / root-outside-stele pixels, kept angles of the quarter. |
 | `cortex_area_um2`, `lacuna_area_um2` | Root-outside-stele and lacuna pixels in the quarter; whole quarter kept only. |
 | `n_lacunae`, `n_lacunae_drawn` | Lacunae with their centre in the quarter, and how many of them were drawn by hand; whole quarter kept only. |

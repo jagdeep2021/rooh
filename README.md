@@ -10,12 +10,15 @@ cross_section_anatomy/
 ├── pipeline.py     propose() auto pass, derive() tissues/layers/areas, click edits, storage
 ├── run_batch.py    folder of images -> anatomy/masks/*.npz + anatomy/qc/*.png (resumable)
 ├── review.py       napari app: fix cells / stele / metaxylem / root; exclude damaged sectors
-├── summarise.py    masks -> results/traits_DATE.xlsx (overall anatomy, opens on START_HERE + Check),
-│                   cortex_pattern_DATE.xlsx (the curves, per quarter), cortex_cells_DATE.csv + all_cells_DATE.csv
-│                   (one row per cell); per image + per quarter only, µm (layout: docs/traits.md);
-│                   earlier_runs/ = earlier results; --full adds results/full/ (the long workbooks, for checks);
-│                   + results/methods_YYYY-MM-DD.txt + results/figures/ (cortex pattern per species, per image)
-│                   every workbook: README (each column: topic, unit, meaning) + run_info (Rooh commit, thresholds)
+├── summarise.py    masks -> results/um/ and results/px/ (same files, µm and pixels): traits_DATE.xlsx (opens on
+│                   START_HERE + Check), cortex_pattern_DATE.xlsx (Curves: per image x quarter x position bin, with
+│                   the key traits on every row), cortex_cells / all_cells_DATE.csv (one row per cell), figures/;
+│                   results/masks/<image>.tif (cells, vessels, tissue, outlines); results/methods_DATE.txt.
+│                   Each run replaces the last. --full adds results/full/ (the long workbooks, for checks).
+│                   Layout: docs/traits.md. Every workbook: README (each column) + run_info (commit, thresholds)
+├── R/plot_curves.R Rscript R/plot_curves.R results/um/cortex_pattern_DATE.xlsx [design.xlsx] [group]: cell size
+│                   across the cortex (all, per quarter) and key traits; plant means, then mean ± SE over plants.
+│                   design.xlsx = image_file + your columns (genotype, treatment ...), joined on the file name
 ├── pattern_plots.py  splines, profile features, the figures (also the live plot in review.py)
 ├── Install (…), Open app (…)   double-click launchers (Mac .command, Windows .bat)
 └── requirements.txt

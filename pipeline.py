@@ -886,24 +886,25 @@ def sector_profile(props, n_bins: int = 10, ref=None, by: str = "position", n_fi
         c = c.dropna(subset=["file"])
         k = np.floor(c.file + 0.5).astype(int)
         top = int(k.max()) if len(k) else 0
-        g = c.groupby(k).agg(median=("area_px", "median"), size=("area_px", "size"), x=("file_rel", "median"))
+        g = c.groupby(k).agg(median=("area_px", "median"), size=("area_px", "size"), x=("file_rel", "median"),
+                             mean=("area_px", "mean"), sd=("area_px", "std"))
         g = g.reindex(range(1, top + 1))
         rows = [{"bin": str(i), "x": r["x"], "n_cells": int(0 if pd.isna(r["size"]) else r["size"]),
-                 "median_area_px": r["median"]} for i, r in g.iterrows()]
+                 "median_area_px": r["median"], "mean_area_px": r["mean"], "sd_area_px": r["sd"]} for i, r in g.iterrows()]
     elif by == "distance":
         w = DIST_BIN_UM / um_per_px if um_per_px and np.isfinite(um_per_px) else np.nan
         c = c[np.isfinite(c.dist_from_stele_px)] if np.isfinite(w) else c.iloc[:0]
         b = (np.clip(c.dist_from_stele_px, 0, None) // w).astype(int) + 1 if len(c) else pd.Series(dtype=int)
         top = int(b.max()) if len(b) else 0
-        g = c.area_px.groupby(b).agg(["median", "size"]).reindex(range(1, top + 1))
+        g = c.area_px.groupby(b).agg(["median", "size", "mean", "std"]).reindex(range(1, top + 1))
         rows = [{"bin": str(k), "x": (k - 0.5) * DIST_BIN_UM, "n_cells": int(0 if pd.isna(r["size"]) else r["size"]),
-                 "median_area_px": r["median"]} for k, r in g.iterrows()]
+                 "median_area_px": r["median"], "mean_area_px": r["mean"], "sd_area_px": r["std"]} for k, r in g.iterrows()]
     else:
         b = (np.clip(c.r_norm, 0, 0.999) * n_bins).astype(int) + 1
-        g = c.area_px.groupby(b).agg(["median", "size"]).reindex(range(1, n_bins + 1))
+        g = c.area_px.groupby(b).agg(["median", "size", "mean", "std"]).reindex(range(1, n_bins + 1))
         rows = [{"bin": str(k), "x": (k - 0.5) / n_bins, "n_cells": int(0 if pd.isna(r["size"]) else r["size"]),
-                 "median_area_px": r["median"]} for k, r in g.iterrows()]
-    d = pd.DataFrame(rows, columns=["bin", "x", "n_cells", "median_area_px"])
+                 "median_area_px": r["median"], "mean_area_px": r["mean"], "sd_area_px": r["std"]} for k, r in g.iterrows()]
+    d = pd.DataFrame(rows, columns=["bin", "x", "n_cells", "median_area_px", "mean_area_px", "sd_area_px"])
     d["rel"] = d.median_area_px / med
     d["few_cells"] = d.n_cells < MIN_CELLS_PER_BIN
     return d

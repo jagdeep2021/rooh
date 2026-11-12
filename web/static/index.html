@@ -149,7 +149,8 @@
     <select id="projSel"></select><button id="projAdd" title="New project">+</button>
     <button id="projDel" title="Delete this project…" data-proj hidden>🗑</button>
     <span id="projNewRow" class="row" hidden><input type="text" id="projName" placeholder="new project name" style="width:150px">
-      <button class="primary" id="projNew">Create</button></span>
+      <button class="primary" id="projNew">Create</button>
+      <label class="file" title="A zip from Download whole project: images, masks, settings and results come back as they were"><button type="button" onclick="this.nextElementSibling.click()">or a project zip…</button><input type="file" id="projZip" accept=".zip"></label></span>
   </div>
   <div class="grp" data-proj hidden>
     <span class="lab">add</span><label class="file"><button type="button" onclick="this.nextElementSibling.click()" title="Add a folder of images (sub-folders become groups)">Folder…</button><input type="file" id="upDir" webkitdirectory multiple></label>
@@ -166,11 +167,13 @@
   <div class="grp" data-proj hidden>
     <select id="pick" title="Image (● checked, ○ to check)"></select>
     <button id="prev" title="Previous image ( , )">‹</button><button id="next" title="Next image ( . )">›</button>
+    <button id="imgDel" title="Delete this image from the project…">✕</button>
     <button class="primary" id="saveNext" title="Mark this image checked and open the next one (Shift-S)">Save + next</button>
     <span class="lab" id="count"></span>
   </div>
   <div class="grp" data-proj hidden>
-    <button id="results" title="The project's Excel files and graphs">Make results</button><button id="download">Download</button>
+    <button id="results" title="The project's Excel files and graphs">Make results</button><button id="download" title="The results (um/, px/, masks/) and samples.xlsx as one zip">Download results</button>
+    <button id="downloadAll" title="Everything: images, masks, settings, samples.xlsx and results. Opens in the desktop app, or upload it again (+, or a project zip)">Download project</button>
     <label class="check" title="Also one cortex pattern graph per image (slower)"><input type="checkbox" id="perImage">per image</label>
   </div>
 </nav>
@@ -372,6 +375,28 @@ async function upload(files) {
   $("jobMsg").textContent = `${imgs.length} image(s) added (${mb(total)} MB in ${Math.round((Date.now() - t0) / 1000)} s). Next: Outline new.`;
 }
 $("upDir").onchange = e => upload(e.target.files).catch(showErr);
+$("projZip").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (!f) return;
+  try { $("jobMsg").textContent = `Uploading ${f.name} (${(f.size / 1e6).toFixed(0)} MB)…`;
+        const fd = new FormData(); fd.append("file", f);
+        const r = await api("/api/projects/import", { method: "POST", body: fd });
+        $("projNewRow").hidden = true; await loadProjects(r.name);
+        $("jobMsg").textContent = `${r.name}: ${r.images} image(s), masks and settings restored.`;
+  } catch (e) { $("jobMsg").textContent = ""; showErr(e); }
+};
+$("imgDel").onclick = async () => {
+  const im = S.images[S.i];
+  if (!im) return showErr("Open an image first.");
+  const what = S.local ? "It leaves the project (the file stays in its folder; its masks move to anatomy/removed/)."
+                       : "The image and its masks leave the project.";
+  if (!confirm(`Delete ${im.image}? ${what}`)) return;
+  try { await api(`/api/projects/${enc(S.project)}/images?rel=${enc(im.image)}`, { method: "DELETE" });
+        const k = S.i; S.i = -1; await refresh();
+        if (S.images.length) show(Math.min(k, S.images.length - 1)); else { S.gray = null; draw(); }
+        $("jobMsg").textContent = `${im.image} deleted.`;
+  } catch (e) { showErr(e); }
+};
 $("upFiles").onchange = e => upload(e.target.files).catch(showErr);
 $("measure").onclick = async () => { try { job(await api(`/api/projects/${enc(S.project)}/measure`, { method: "POST" })); } catch (e) { showErr(e); } };
 
@@ -389,11 +414,12 @@ $("results").onclick = async () => {
   $("results").disabled = true; $("resMsg").textContent = "Making the Excel files and graphs…";
   try { const r = await api(`/api/projects/${enc(S.project)}/results`, form({ image_figures: $("perImage").checked }));
         await refresh();
-        $("resMsg").textContent = "Done: " + r.results.join(", ") + ". Click Download."; }
+        $("resMsg").textContent = "Done: " + r.results.join(", ") + ". Click Download results."; }
   catch (e) { showErr(e); $("resMsg").textContent = ""; }
   $("results").disabled = false;
 };
 $("download").onclick = () => { location.href = `/api/projects/${enc(S.project)}/download`; };
+$("downloadAll").onclick = () => { location.href = `/api/projects/${enc(S.project)}/download_all`; };
 
 // ---------------------------------------------------------------- viewer
 const cv = $("cv"), ctx = cv.getContext("2d");

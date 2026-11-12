@@ -636,7 +636,7 @@ def run_web(tmp: Path, shots: Path, cellpose: bool, pw):
         msg = page.inner_text("#resMsg")
         check("results", "Make results lists the 4 files", all(k in msg for k in ("traits_", "cortex_pattern_",
                                                                                   "cortex_cells_", "all_cells_")), True)
-        tr = pd.read_excel(next((proj / "results").glob("traits_*.xlsx")), sheet_name="Per image").set_index("image_file")
+        tr = pd.read_excel(next((proj / "results/um").glob("traits_*.xlsx")), sheet_name="Per image").set_index("image_file")
         check("results", "every image in traits", sorted(tr.index), sorted(ui.js("() => S.images.map(i => i.image)")))
         check("results", "the edits are in the results (S: 6 vessels, 360 kept, 0 lacunae)",
               (int(tr.at[S_REL, "mx_n"]), float(tr.at[S_REL, "angle_kept_deg"])), (6, 360.0))
@@ -651,8 +651,50 @@ def run_web(tmp: Path, shots: Path, cellpose: bool, pw):
         z = zipfile.ZipFile(dl.value.path())
         names = z.namelist()
         check("results", "Download zip holds traits + samples.xlsx",
-              any("results/traits_" in n for n in names) and any(n.endswith("anatomy/samples.xlsx") for n in names), True)
+              any("results/um/traits_" in n for n in names) and any(n.endswith("anatomy/samples.xlsx") for n in names), True)
         ui.shot("08_results")
+
+        # ---- Download project -> upload it again as a project zip: everything back, byte for byte (2026-11-12)
+        with page.expect_download() as dl:
+            ui.click("downloadAll")
+        zpath = tmp / "whole_project.zip"
+        dl.value.save_as(zpath)
+        page.set_input_files("#projZip", str(zpath)); USED.add("id:projZip")
+        page.wait_for_function("() => S.project === 'Synthetic_test_2' && S.images.length > 0", timeout=60000)
+        HIT.add("post /api/projects/import")
+        proj2 = proj.parent / "Synthetic_test_2"
+        skip = lambda p: p.parts[0] in (".cache", ".undo", ".redo") or p.parts[:2] == ("anatomy", "qc")
+        files = lambda d: {p.relative_to(d): p for p in d.rglob("*") if p.is_file() and not skip(p.relative_to(d))}
+        a, b = files(proj), files(proj2)
+        check("project zip", "same files after download + upload (raw, masks, settings, samples, results)",
+              sorted(map(str, set(a) ^ set(b))), [])
+        same = lambda k: (json.loads(a[k].read_text()) == json.loads(b[k].read_text()) if k.suffix == ".json"
+                          else a[k].read_bytes() == b[k].read_bytes())
+        check("project zip", "every file identical", sorted(str(k) for k in set(a) & set(b) if not same(k)), [])
+        check("project zip", "images, masks, statuses as before", ui.js("() => S.images.map(i => [i.image, i.status])"),
+              [[i["image"], i["status"]] for i in json.loads(page.request.get(base + "/api/projects/Synthetic_test").text())["images"]])
+        check("project zip", "the edited image measures the same", ui.traits(S_REL), json.loads(page.request.get(
+              base + f"/api/projects/Synthetic_test/traits?rel={S_REL}").text()))
+        ui.js("async () => api(`/api/projects/${enc(S.project)}/results`, form({ image_figures: false }))")
+        t2 = pd.read_excel(next((proj2 / "results/um").glob("traits_*.xlsx")), sheet_name="Per image").set_index("image_file")
+        check("project zip", "Make results on the copy = the original's numbers",
+              t2.drop(columns=["status"], errors="ignore").equals(tr.drop(columns=["status"], errors="ignore")), True)
+
+        # ---- delete one image (in the copy): off the list, its masks and samples row gone, to the trash
+        ui.open_image(S2_REL)
+        ui.click("imgDel")
+        page.wait_for_function("rel => !S.images.some(i => i.image === rel)", arg=S2_REL)
+        HIT.add("delete /api/projects/{name}/images")
+        k2 = RB.image_key(Path(S2_REL))
+        check("delete image", "image and masks gone from the project",
+              ((proj2 / "raw" / S2_REL).exists(), (proj2 / f"anatomy/masks/{k2}.npz").exists()), (False, False))
+        check("delete image", "... and in the trash", sorted(p.name for p in (data / "trash").rglob("*")
+                                                             if p.name in (Path(S2_REL).name, f"{k2}.npz")),
+              sorted([Path(S2_REL).name, f"{k2}.npz"]))
+        check("delete image", "samples.xlsx row gone", S2_REL in set(pd.read_excel(proj2 / "anatomy/samples.xlsx").image_file),
+              False)
+        check("delete image", "the original project untouched", (proj / "raw" / S2_REL).exists(), True)
+        ui.js("async () => { await openProject('Synthetic_test'); }")
 
         # ---- a second user cannot see this project; the admin sees everyone's
         gp2 = browser.new_context().new_page()
@@ -724,7 +766,13 @@ def run_local(tmp: Path, shots: Path, pw):
         check("desktop", "Ctrl-Z undoes", ui.traits("Maize/wt/P1/S.png")["n_cortex_cells"], 288)
         ui.click("results")
         page.wait_for_function("() => $('resMsg').textContent.startsWith('Done')", timeout=600000)
-        check("desktop", "Make results writes into the folder", any((exp / "results").glob("traits_*.xlsx")), True)
+        check("desktop", "Make results writes into the folder", any((exp / "results/um").glob("traits_*.xlsx")), True)
+        ui.open_image("Maize/wt/P1/S.png")
+        ui.click("imgDel")
+        page.wait_for_function("() => S.images.length === 1")
+        check("desktop", "delete image: off the list, file left in place, masks in anatomy/removed/",
+              ((exp / "raw/Maize/wt/P1/S.png").exists(), (exp / "anatomy/removed/masks/Maize__wt__P1__S.npz").exists(),
+               json.loads((exp / "anatomy/settings.json").read_text())["removed"]), (True, True, ["Maize/wt/P1/S.png"]))
         ui.shot("09_desktop")
         ui.click("projDel")                       # confirm(): yes -> off the list, folder untouched
         page.wait_for_function("() => S.project === null")

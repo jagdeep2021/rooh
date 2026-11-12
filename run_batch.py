@@ -31,10 +31,16 @@ def image_key(rel: Path) -> str:
 OUTPUT_DIRS = {"anatomy", "results"}         # the tool's own outputs, never images to measure
 
 
-def list_images(image_dir: Path) -> list[Path]:
+def removed(anatomy_dir) -> set[str]:
+    """Images taken out of the project on this computer (settings.json "removed"): the files stay where they are."""
+    f = Path(anatomy_dir) / "settings.json"
+    return set(json.loads(f.read_text()).get("removed", [])) if f.exists() else set()
+
+
+def list_images(image_dir: Path, skip=()) -> list[Path]:
     return sorted(r for r in (p.relative_to(image_dir) for p in image_dir.rglob("*"))
                   if r.suffix.lower() in P.IMAGE_EXT and not r.name.startswith(".")
-                  and not OUTPUT_DIRS & set(r.parts[:-1]))
+                  and not OUTPUT_DIRS & set(r.parts[:-1]) and r.as_posix() not in skip)
 
 
 def load_settings(out_dir: Path, image_dir: Path | None = None, **override) -> dict:
@@ -65,7 +71,7 @@ def locate(folder):
 
 
 def n_to_measure(image_dir, anatomy_dir) -> int:
-    return sum(not (Path(anatomy_dir) / "masks" / f"{image_key(r)}.npz").exists() for r in list_images(Path(image_dir)))
+    return sum(not (Path(anatomy_dir) / "masks" / f"{image_key(r)}.npz").exists() for r in list_images(Path(image_dir), removed(anatomy_dir)))
 
 
 def batch(image_dir, out_dir=None, diameter=None, redo=False, on_start=None, propose=None):
@@ -78,7 +84,7 @@ def batch(image_dir, out_dir=None, diameter=None, redo=False, on_start=None, pro
     s = load_settings(out, image_dir, diameter=diameter)
     (out / "masks").mkdir(exist_ok=True)
     (out / "qc").mkdir(exist_ok=True)
-    imgs = list_images(image_dir)
+    imgs = list_images(image_dir, set(s.get("removed", [])))
     if not imgs:
         raise FileNotFoundError(f"No images ({', '.join(P.IMAGE_EXT)}) in {image_dir}")
     for i, rel in enumerate(imgs, 1):
