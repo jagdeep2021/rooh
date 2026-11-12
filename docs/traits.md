@@ -103,7 +103,7 @@ are kept**. Nothing per quarter is estimated. Per-image cortex traits = the mean
 | Column | How |
 |---|---|
 | `quarter`, `kept_deg` | Q1–Q4 and its kept degrees. |
-| `ccfn` | **Gap-aware CCFN**: on each 5° ray (as `n_cortical_layers`), the file number of the outermost cortical cell, where a gap **between cortical cells** on the ray (lacuna, missed cell) counts as the cells it would hold, round(gap / the neighbouring cells' length on the ray) (the `cell_files` rule). Unlike `cell_files`, a gap between the stele edge and the first cell is not counted: on the shipped examples it came from stele outlines drawn too small or cortex pulled away, never lost cells. Median over the quarter's kept rays. |
+| `ccfn` | **Gap-aware CCFN**: on each 5° ray (as `n_cortical_layers`), the file number of the outermost cortical cell, where a gap **between cortical cells** on the ray (lacuna, missed cell) counts as the cells it would hold, round(gap / the neighbouring cells' length on the ray) (the `cell_files` rule). A gap between the stele edge and the first cell is not counted (nor in `cell_files` since 2026-11-11): on the shipped examples it came from stele outlines drawn too small or cortex pulled away, never lost cells. Median over the quarter's kept rays. |
 | `ccfn_cells_present` | The same rays counting only the cells present (the `n_cortical_layers` rule). `ccfn` = this + the files in gaps; far above it with no aerenchyma = cells Cellpose missed. |
 | `n_rays` | Rays behind `ccfn`. |
 | `cortex_width_um` | Mean (root radius − stele radius) over the quarter's kept degrees. |
@@ -115,6 +115,11 @@ are kept**. Nothing per quarter is estimated. Per-image cortex traits = the mean
 **Sheets `Cell area by file` / `Cells per file`**: one row per image; `file_1` … `file_N` = mean cell area (µm²) and
 cell count per cell file (file 1 next to the stele; cortex + epidermis, the pattern tissue, so the outermost files
 hold the epidermis). File = the median of a cell's gap-aware numbers on rays every 0.5° (`cell_files`).
+`Cells per file` (2026-11-11) is a count of a ring, so it is filled only when (a) the whole section is kept (360°) and
+(b) the file goes all round: files up to the 10th percentile of the files per ray (`complete_files`,
+`FILE_COMPLETE_PCT`). Outer files beyond it exist only where the cortex is thicker and mix layers (on thin sides they
+hold the epidermis: on the Hallie examples, counted files median 0% epidermis cells, cut files 27%). `Cell area by file`
+keeps every file (a mean per cell), but read its outer files with the same caution.
 
 ---
 
@@ -186,7 +191,7 @@ hold the epidermis). File = the median of a cell's gap-aware numbers on rays eve
 - **position** (headline): `r_norm` in 10 equal bins, x = bin centre (0–1). Survives aerenchyma and lost inner files; lost outer tissue stretches it (exclude a torn arc; `epidermis = no` flags loss all round).
 - **file**: cells grouped by cell file number, x = the median `file_rel` of the file's cells (0–1). File number:
   - Rays every 0.5° in the kept angles number the cells 1, 2 … from the stele out.
-  - **A gap on a ray** (lacuna, missed cell, gap at the stele edge) **counts as the cells it would have held**: round(gap length / the neighbouring cells' length on the ray).
+  - **A gap between cells on a ray** (lacuna, missed cell) **counts as the cells it would have held**: round(gap length / the neighbouring cells' length on the ray). A gap between the stele edge and the first cell does not (2026-11-11, as `ccfn`): numbering starts at the first cell.
   - Each cell's `file` = the median of its numbers; `file_rel` = the median of (k − 0.5) / files on the ray.
   - The epidermis is the outermost file.
 - **distance**: 20 µm bins of distance from the stele edge (images with a scale only); x is in µm. It survives every kind of tissue loss but carries root size, so it is a cross-check.

@@ -66,7 +66,7 @@ def positions(cells, region, mx, arcs):
     out = pd.DataFrame({"x": c.x.round().values, "y": c.y.round().values, "area": c.area_px.values,
                         "position": c.r_norm.values, "distance": c.dist_from_stele_px.values / WIDTH0})
     for name, g in (("file", False), ("file, gap-aware", True)):
-        fl = P.cell_files(cells, props, centre, arcs, region=region, gaps=g)
+        fl = P.cell_files(cells, props, centre, arcs, gaps=g)
         out[name] = c.label.map(fl.file_rel).values
         out[name.replace("file", "file number")] = c.label.map(fl.file).values / 9   # 9 files intact: same axis
     q = P.quarter_of(np.degrees(c.angle_rad.values))

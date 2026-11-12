@@ -639,7 +639,7 @@ class Reviewer:
         self.lac.data = np.where(lac_mask > 0, 1, np.where(lac_mask < 0, 2, 0)).astype(np.uint8)   # 2 = overridden
         at = P.lacuna_traits(lac, n_gaps, st["cortex_area_kept_px"])
         if region.any() and (region == 2).any():          # cells coloured by file number (pattern_plots.file_rgba)
-            self.files_lyr.data = PP.file_rgba(cells, P.cell_files(cells, props, centre, self.arcs, region=region).file)
+            self.files_lyr.data = PP.file_rgba(cells, P.cell_files(cells, props, centre, self.arcs).file)
         else:
             self.files_lyr.data = np.zeros((*cells.shape, 4), np.uint8)
         self.aer_btn.text = (f"Aerenchyma · {at['n_lacunae']} ({100 * at['aerenchyma_share']:.1f}%)"

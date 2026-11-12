@@ -317,7 +317,7 @@ def overlay_png(d: Path, rel: str, part: str) -> Path:
     elif part == "files":                              # cells coloured by cell file number (pattern_plots.file_rgba)
         if (region == 2).any():
             *_, centre, arcs, props, _ = _live(d, npz)
-            rgba = PP.file_rgba(cells, P.cell_files(cells, props, centre, arcs, region=region).file)
+            rgba = PP.file_rgba(cells, P.cell_files(cells, props, centre, arcs).file)
     else:
         rgba[region == 2] = OVERLAY["stele_fill"]      # the stele is an area: lightly shaded, its cells still visible
         rgba[mx > 0] = OVERLAY["mx"]
