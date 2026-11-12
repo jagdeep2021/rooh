@@ -266,3 +266,15 @@ Rooh started on 2026-10-27 as `cross_section_anatomy`, was briefly renamed JadNa
   - the Check flags.
   Both example projects run, with an earlier run's files moved aside.
 - **Re-run:** Make results on any project to get the new files.
+
+## 2026-11-11 · The old workbooks are no longer written
+
+- **Decision:** Make results writes only traits, cortex_pattern, the two cell CSVs, methods and figures.
+  anatomy_summary, all_cells.xlsx and cortex_pattern_full are written only with `summarise.py --full`, into
+  `results/full/`. Old-layout workbooks already at the top of results/ move to `earlier_runs/` (never deleted).
+  Existing `old_format/` folders from the 2026-11-10 release are left as they are.
+- **Why:** Jagdeep: "we don't need old result files". The one-release grace period (2026-11-10 entry) is dropped;
+  nobody's analysis reads them. The checks and compare.py still need every intermediate table, hence `--full`.
+- **Evidence:** no number changed. tests/check_numbers.py T9 (plain run: no full/, top = the three outputs + methods,
+  an old-layout workbook from today and an earlier traits file moved to earlier_runs/); 292 pass.
+- **Re-run:** not needed.

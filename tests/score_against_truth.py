@@ -61,7 +61,7 @@ def main(sec: Path, anat: Path):
     s = pd.read_excel(anat / "samples.xlsx", dtype={"image_file": str})
     s["um_per_px"] = s.image_file.map(truth.um_per_px)
     s.to_excel(anat / "samples.xlsx", index=False)
-    SUM.main(anat)
+    SUM.main(anat, full=True)
     res = anat.parent / "results"
     got = pd.read_excel(sorted(res.rglob("anatomy_summary_*.xlsx"))[-1], sheet_name="per_image").set_index("image_file")
     rows = []

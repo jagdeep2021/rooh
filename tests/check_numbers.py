@@ -117,8 +117,8 @@ def write_project(d: Path, images: dict):
 
 
 def results(d: Path) -> dict:
-    SUM.main(d / "anatomy")
-    out = d / "results" / "old_format"         # the full record (old format, kept for one release)
+    SUM.main(d / "anatomy", full=True)
+    out = d / "results" / "full"               # the full record (summarise.py --full)
     img = pd.read_excel(next(out.glob("anatomy_summary_*.xlsx")), sheet_name="per_image")
     prof_all = pd.read_excel(next(out.glob("cortex_pattern_full_*.xlsx")), sheet_name="per_image_profile", dtype={"bin": str})
     prof = prof_all[(prof_all.basis == "position") & (prof_all.scope == "section")]
@@ -584,12 +584,12 @@ def traits_checks(out_dir: Path, base: Path, gray):
     miss = sorted({c for _, c in cols if f"`{c}`" not in tr} - {"image_file", "status", "um_per_px"})
     ck("every traits column is in docs/traits.md", ", ".join(miss) or "none missing", "none missing")
 
-    # the layout (2026-11-10): three outputs on top, the old workbooks in old_format/
+    # the layout: three outputs on top; the long workbooks only with --full, in full/
     top = sorted(p.name.split("_20")[0] for p in (base / "results").iterdir() if p.is_file())
     ck("results/: traits, cortex_pattern, 2 cell CSVs, methods", ",".join(top),
        "all_cells,cortex_cells,cortex_pattern,methods,traits")
-    old = sorted(p.name.split("_20")[0] for p in (base / "results/old_format").iterdir())
-    ck("old_format/: the 3 old workbooks", ",".join(old), "all_cells,anatomy_summary,cortex_pattern_full")
+    old = sorted(p.name.split("_20")[0] for p in (base / "results/full").iterdir())
+    ck("full/ (--full only): the 3 long workbooks", ",".join(old), "all_cells,anatomy_summary,cortex_pattern_full")
     ck("traits opens on START_HERE", pd.ExcelFile(next((base / "results").glob("traits_*.xlsx"))).sheet_names[0],
        "START_HERE")
     cc = pd.read_csv(next((base / "results").glob("cortex_cells_*.csv")))
@@ -635,7 +635,7 @@ def traits_checks(out_dir: Path, base: Path, gray):
         npz = d / "anatomy/masks/S.npz"
         c, rg, m, _ = P.load_state(npz)
         fn(npz, c.copy(), rg.copy(), m.copy())
-        SUM.main(d / "anatomy")
+        SUM.main(d / "anatomy", full=True)
         t = traits(d)
         return (t["Per image"].set_index("image_file").loc["S.tif"],
                 t["Per quarter"][t["Per quarter"].image_file == "S.tif"].set_index("quarter"))
@@ -661,9 +661,9 @@ def traits_checks(out_dir: Path, base: Path, gray):
     d2 = out_dir / "T2_torn_edge_filled" / "results"
     ac = pd.read_csv(next(d2.glob("all_cells_*.csv")))
     ac = ac[(ac.image_file == "S.tif") & (ac.tissue == "cortex")]
-    full = pd.read_excel(next((d2 / "old_format").glob("anatomy_summary_*.xlsx")), sheet_name="per_image") \
+    full = pd.read_excel(next((d2 / "full").glob("anatomy_summary_*.xlsx")), sheet_name="per_image") \
         .set_index("image_file").loc["S.tif"]
-    oc = pd.read_excel(next((d2 / "old_format").glob("all_cells_*.xlsx")), sheet_name="all_cells")
+    oc = pd.read_excel(next((d2 / "full").glob("all_cells_*.xlsx")), sheet_name="all_cells")
     check("T2_torn_edge_filled", "all_cells.csv: kept = no for every excluded cortex cell",
           int((ac.kept == "no").sum()), int(((oc.image_file == "S.tif") & (oc.tissue == "cortex_excluded")).sum()))
     check("T2_torn_edge_filled", "all_cells.csv: none of them in the kept angles",
@@ -740,7 +740,7 @@ def traits_checks(out_dir: Path, base: Path, gray):
     shutil.rmtree(d / "results", ignore_errors=True)
     pd.DataFrame([{"image_file": "S.tif", "plant": "P1", "um_per_px": UM, "include": "yes", "genotype": "B73"}]) \
         .to_excel(d / "anatomy/samples.xlsx", index=False)
-    SUM.main(d / "anatomy")
+    SUM.main(d / "anatomy", full=True)
     t7 = traits(d)
     s7 = pd.read_excel(d / "anatomy/samples.xlsx")
     check("T7_stale_samples", "both images in traits", sorted(t7["Per image"].image_file), ["S.tif", "S_rot.tif"])
@@ -750,12 +750,31 @@ def traits_checks(out_dir: Path, base: Path, gray):
     # T8: include = no: left out, and START_HERE says so
     s7.loc[s7.image_file == "S_rot.tif", "include"] = "no"
     s7.to_excel(d / "anatomy/samples.xlsx", index=False)
-    SUM.main(d / "anatomy")
+    SUM.main(d / "anatomy", full=True)
     t8 = traits(d)
     sh = pd.read_excel(next((d / "results").glob("traits_*.xlsx")), sheet_name="START_HERE")
     check("T8_include_no", "left out of traits", list(t8["Per image"].image_file), ["S.tif"])
     check("T8_include_no", "START_HERE names it", sh.astype(str).apply(lambda r: r.str.contains("S_rot.tif")).any().any(),
           True)
+    # T9: a plain Make results (no --full) writes only the three outputs; an old-layout workbook from today and an
+    # earlier date's traits file are moved to earlier_runs/, never deleted
+    d = out_dir / "T9_default_layout"
+    shutil.copytree(base, d)
+    shutil.rmtree(d / "results", ignore_errors=True)
+    (d / "results").mkdir()
+    import datetime as _dt
+    today = _dt.date.today().isoformat()
+    pd.DataFrame({"x": [1]}).to_excel(d / f"results/anatomy_summary_{today}.xlsx", index=False)
+    pd.DataFrame({"x": [1]}).to_excel(d / "results/traits_2026-01-01.xlsx", index=False)
+    SUM.main(d / "anatomy")
+    r = d / "results"
+    check("T9_default_layout", "no full/ folder", (r / "full").exists(), False)
+    check("T9_default_layout", "top: the three outputs + methods",
+          ",".join(sorted(p.name.split("_20")[0] for p in r.iterdir() if p.is_file())),
+          "all_cells,cortex_cells,cortex_pattern,methods,traits")
+    check("T9_default_layout", "old-layout and earlier files moved to earlier_runs/",
+          sorted(p.name for p in (r / "earlier_runs").iterdir()),
+          sorted([f"anatomy_summary_{today}.xlsx", "traits_2026-01-01.xlsx"]))
 
 
 if __name__ == "__main__":

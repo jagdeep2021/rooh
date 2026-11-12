@@ -13,7 +13,7 @@ cross_section_anatomy/
 ├── summarise.py    masks -> results/traits_DATE.xlsx (overall anatomy, opens on START_HERE + Check),
 │                   cortex_pattern_DATE.xlsx (the curves, per quarter), cortex_cells_DATE.csv + all_cells_DATE.csv
 │                   (one row per cell); per image + per quarter only, µm (layout: docs/traits.md);
-│                   old_format/ = the pre-2026-11-10 workbooks for one release; earlier_runs/ = older dates;
+│                   earlier_runs/ = earlier results; --full adds results/full/ (the long workbooks, for checks);
 │                   + results/methods_YYYY-MM-DD.txt + results/figures/ (cortex pattern per species, per image)
 │                   every workbook: README (each column: topic, unit, meaning) + run_info (Rooh commit, thresholds)
 ├── pattern_plots.py  splines, profile features, the figures (also the live plot in review.py)
@@ -69,7 +69,7 @@ cross-section-anatomy` first). Stopping a local run does not stop calls already 
 
 ## Compare two sets of results
 
-`python compare.py <reference.xlsx> <other.xlsx>`: two `results/old_format/anatomy_summary_*.xlsx` of the same images (auto pass vs a
+`python compare.py <reference.xlsx> <other.xlsx>`: two `results/full/anatomy_summary_*.xlsx` (Make results with `summarise.py --full`) of the same images (auto pass vs a
 review, or reviewer vs reviewer). Matches on image_file, compares pixel columns (scale can't fake a difference),
 and writes `compare_<other>_vs_<reference>.xlsx` next to `other`: per trait n changed, mean difference with 95%
 limits of agreement (Bland & Altman 1986), mean |% difference| and Lin's CCC (Lin 1989); per image the values.
