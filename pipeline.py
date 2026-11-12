@@ -201,11 +201,23 @@ def typical_cell_area(cells: np.ndarray) -> int:
     return int(np.median(a)) if len(a) else 2000
 
 
+CLICK_GROW_PX = 5   # a clicked cell grows this far into unclaimed pixels, to sit as Cellpose's outlines do (fitted
+                    # 2026-11-12 on Hallie's images: lumen fill alone = 0.79 x the Cellpose area of the same cell,
+                    # +5 px = 1.00, IoU 0.77 -> 0.96; docs/development/click_area.py)
+
+
 def add_cell(gray, cells, y, x) -> int:
-    """Add a cell at the click (only into unlabelled pixels). Returns its id (0 if none)."""
+    """Add a cell at the click (only into unlabelled pixels): the lumen out to its walls, then grown up to
+    CLICK_GROW_PX into pixels no cell has. Returns its id (0 if none)."""
     reg = lumen_at(gray, y, x, 8 * typical_cell_area(cells)) & (cells == 0)
     if reg.sum() < 10:
         return 0
+    r = int(np.sqrt(reg.sum()) + 3 * CLICK_GROW_PX)          # work in a window round the cell
+    ys, xs = np.nonzero(reg)
+    y0, y1 = max(ys.min() - r, 0), min(ys.max() + r + 1, cells.shape[0])
+    x0, x1 = max(xs.min() - r, 0), min(xs.max() + r + 1, cells.shape[1])
+    near = ndi.distance_transform_edt(~reg[y0:y1, x0:x1]) <= CLICK_GROW_PX
+    reg[y0:y1, x0:x1] |= near & (cells[y0:y1, x0:x1] == 0)
     new = int(cells.max()) + 1
     cells[reg] = new
     return new
@@ -367,11 +379,31 @@ def derive(cells: np.ndarray, region: np.ndarray, mx: np.ndarray, angle_deg: flo
             for t in np.arange(0.5, 360, 1.0):
                 seed |= set(ray_cells(cells, c0, t, inside)[:1])
         layer = {c: 1 for c in seed}
-        frontier, k = set(seed), 1
-        while frontier:
-            k += 1
-            frontier = {n for c in frontier for n in adj.get(c, ()) if n in cortex and n not in layer}
-            layer.update({n: k for n in frontier})
+
+        def flood(frontier):
+            while frontier:
+                frontier = {n: layer[c] + 1 for c in frontier for n in adj.get(c, ()) if n in cortex and n not in layer}
+                layer.update(frontier)
+        flood(dict(layer))
+        # a crack across the cortex (the outer part pulled away all round) left every cell beyond it 'unassigned'
+        # (2026-11-12: half the cortex lost in check_numbers C6). On each ray the first cell beyond the reached ones
+        # starts a new flood, numbered on from the last reached cell on that ray; repeat until nothing new.
+        if stele.any() and set(props.label[root[yi, xi]]) & cortex - layer.keys():
+            c0 = centre_of(region, centre)
+            while True:
+                new = {}
+                for t in np.arange(0.5, 360, 1.0):
+                    last = 0
+                    for l in ray_cells(cells, c0, t, cortex):
+                        if l in layer:
+                            last = layer[l]
+                        elif last and l not in new:
+                            new[l] = last + 1
+                            break
+                if not new:
+                    break
+                layer.update(new)
+                flood(new)
         props["tissue"] = np.where(props.label.isin(air), "air_space",
                           np.where(props.label.isin(in_stele), "stele",
                                    np.where(props.label.isin(edge), "epidermis",
@@ -398,16 +430,27 @@ def derive(cells: np.ndarray, region: np.ndarray, mx: np.ndarray, angle_deg: flo
     return props, mxp.rename(columns={"area": "area_px"}), traits
 
 
+def main_piece(m: np.ndarray) -> np.ndarray:
+    """The largest connected piece of a mask: a stray fleck of stele or root outline (a slip of the pen, debris
+    outlined) must not move the edges (check_numbers C4)."""
+    lab, n = ndi.label(m)
+    if n <= 1:
+        return m
+    return lab == (np.argmax(np.bincount(lab.ravel())[1:]) + 1)
+
+
 def radial_profile(region: np.ndarray, centre, n_angles: int = 360):
-    """Stele and root radius (px) at each whole degree, measured from the centre."""
+    """Stele and root radius (px) at each whole degree, measured from the centre: the outermost pixel of the main
+    piece of each outline along the ray."""
     t = np.radians(np.arange(n_angles) * 360 / n_angles)
     r = np.arange(0, max(region.shape))
     y = np.round(centre[0] - np.outer(np.sin(t), r)).astype(int)
     x = np.round(centre[1] + np.outer(np.cos(t), r)).astype(int)
     ok = (y >= 0) & (y < region.shape[0]) & (x >= 0) & (x < region.shape[1])
-    v = np.where(ok, region[y.clip(0, region.shape[0] - 1), x.clip(0, region.shape[1] - 1)], 0)
-    last = lambda m: np.where(m.any(1), m.shape[1] - 1 - np.argmax(m[:, ::-1], 1), 0)
-    return last(v == 2).astype(float), last(v >= 1).astype(float)
+    last =lambda m: np.where(m.any(1), m.shape[1] - 1 - np.argmax(m[:, ::-1], 1), 0)
+    st, rt = main_piece(region == 2), main_piece(region >= 1)
+    yc, xc = y.clip(0, region.shape[0] - 1), x.clip(0, region.shape[1] - 1)
+    return last(ok & st[yc, xc]).astype(float), last(ok & rt[yc, xc]).astype(float)
 
 
 def radial_position(props: pd.DataFrame, region: np.ndarray, centre) -> pd.DataFrame:

@@ -26,12 +26,16 @@ explains how they came about.
 1. **stele**: centre inside the stele outline.
 2. **air_space**: smaller than 25% of its neighbours' median area, with at most 5 neighbours (a space at a cell junction, not a cell).
 3. **epidermis**: touches the 6 px band inside the root outline. This is a position tag, not a cell type.
-4. **cortex**: everything else inside the root that is connected, cell to cell, to the stele side. The trace starts from cells within 6 px of the stele and from the first cell on each 1° ray. Cells it cannot reach are **unassigned** (debris, fragments).
+4. **cortex**: everything else inside the root that is connected, cell to cell, to the stele side. The trace starts from cells within 6 px of the stele and from the first cell on each 1° ray. Since 2026-11-12, a crack across the cortex does not stop it: on each ray the first cell beyond the reached ones starts a new trace (a crack all round had left the outer half 'unassigned'). Cells still not reached are **unassigned** (debris, fragments).
 5. **…_excluded**: the same, with the centre in an excluded sector. Kept in `all_cells`, left out of every cortex number.
 
 **Position of a cell:**
 - `r_norm` = (r − r_stele(θ)) / (r_root(θ) − r_stele(θ)), where r is the distance from the centre and θ is the cell's own angle. 0 is the stele edge and 1 is the root edge, both read at that angle (1° steps).
-- `dist_from_stele` = r − r_stele(θ).
+- `dist_from_stele` = r − r_stele(θ): along the line from the centre, so on an oval stele it runs a little longer than the shortest distance on the flanks (real sections: median +1 to +3.5 px, 95th percentile 0.15–0.28 cell diameters; `docs/development/stele_distance.py`).
+- r_stele and r_root come from the **main piece** of each outline (since 2026-11-12): a stray fleck of stele outline in the cortex, or root outline drawn round debris, no longer moves the edges.
+- The centre is the stele centroid unless set by hand; `centre_x_px`, `centre_y_px` in the cell CSVs.
+
+**A cell clicked in by hand** fills its lumen to the walls and then grows up to 5 px (`CLICK_GROW_PX`) into pixels no cell has, so it sits as Cellpose's outlines do (lumen alone was 0.79 × the Cellpose area on Hallie's images; `docs/development/click_area.py`). Cells clicked before 2026-11-12 keep their smaller outline.
 
 **Scale:** µm per pixel is typed per image in `samples.xlsx`; it is never read from a scale bar. Areas convert by (µm/px)². Without a scale an image stays in pixels and is left out of µm figures.
 
@@ -70,9 +74,11 @@ missed-cell gaps, epidermis mostly missing, lacunae overruled by hand), plus the
 - `Aerenchyma by position`: per image × bin, `lacuna_share` (kept angles).
 The file and distance bases, `_abs`, `_rel_cortex` and whole-section fits are in `full/cortex_pattern_full` (`--full` only).
 
-**Cell CSVs**: `cell`, (`tissue`, `kept`: all_cells only), `quarter`, `x_px`, `y_px`, `angle_rad` (around the stele
-centre, counter-clockwise from the image's right), `r_um` (from the stele centre), `r_norm` (0 stele edge, 1 root
-edge, along the cell's direction), `file` (estimated cell file number, cortex and epidermis), `area_px`, `area_um2`.
+**Cell CSVs**: `cell` (its id in the mask), (`tissue`, `kept`: all_cells only), `quarter`, `x_px`, `y_px`,
+`centre_x_px`, `centre_y_px` (the centre used: x − centre_x, centre_y − y place the cell in the root), `angle_rad`
+(around the centre, counter-clockwise from the image's right), `r_um` (from the centre), `dist_from_stele_um` (from
+the stele edge), `r_norm` (0 stele edge, 1 root edge, along the cell's direction), `file` (estimated cell file number,
+cortex and epidermis), `area_px`, `area_um2`.
 
 ## The traits file (`traits_DATE.xlsx`)
 

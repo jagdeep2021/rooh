@@ -530,6 +530,7 @@ def run(out_dir: Path):
          "shows what happens if the outline takes in the lateral root")
 
     traits_checks(out_dir, base, gray)
+    cell_checks(base, gray)
 
 
 def traits(d: Path) -> dict:
@@ -803,6 +804,121 @@ def traits_checks(out_dir: Path, base: Path, gray):
     check("T9_default_layout", "old-layout and earlier files moved to earlier_runs/",
           sorted(p.name for p in (r / "earlier_runs").iterdir()),
           sorted([f"anatomy_summary_{today}.xlsx", "traits_2026-01-01.xlsx"]))
+
+
+
+def oval_section(a=190, b=120, fleck=False, debris=False):
+    """Cortex layers PARALLEL to an oval stele (a x b px half-axes): layer k = distance d from the stele edge in
+    [edge_k, edge_k+1), so the truth is d itself; cells 10 degrees wide, epidermis 20 px. fleck: a stray piece of stele
+    outline in the cortex (r 30 at 300 px, 95 degrees); debris: a stray piece of root outline just outside the root."""
+    from scipy import ndimage as ndi
+    stele = ((yy - C[0]) / b) ** 2 + ((xx - C[1]) / a) ** 2 < 1
+    d = ndi.distance_transform_edt(~stele)
+    edges = np.r_[0, np.cumsum(WIDTHS)]
+    cells = np.zeros((N, N), np.int32)
+    cells[stele] = 1 + (TH[stele] // 30).astype(int)
+    for k in range(8):
+        m = (d > edges[k]) & (d <= edges[k + 1])
+        cells[m] = 100 + 100 * k + (TH[m] // 10).astype(int)
+    epi = (d > edges[-1]) & (d <= edges[-1] + 20)
+    cells[epi] = 5000 + (TH[epi] // 5).astype(int)
+    region = np.where(d <= edges[-1] + 20, 1, 0).astype(np.uint8)
+    region[stele] = 2
+    if fleck:                                       # on the direction of a column of cell centres (95 degrees)
+        fy, fx = at(300, 95)
+        region[(yy - fy) ** 2 + (xx - fx) ** 2 < 30 ** 2] = 2
+    if debris:                                      # 5 px outside the root edge, on the cells at 275 degrees
+        fy, fx = at(510, 275)
+        region[(yy - fy) ** 2 + (xx - fx) ** 2 < 30 ** 2] = 1
+    return segmentation.relabel_sequential(cells)[0], region, d, edges[-1] + 20
+
+
+def cell_checks(base: Path, gray):
+    """The cortical cell itself (2026-11-12): found, placed, sized, and findable again from the CSV."""
+    from skimage.transform import rescale
+    # C1: the CSV leads back to each cell: its id in the mask, its x, y inside it, its distances from the centre
+    cells, region, mx, _ = P.load_state(base / "anatomy/masks/S.npz")
+    cc = pd.read_csv(next((base / "results").glob("cortex_cells_*.csv")))
+    cc = cc[cc.image_file == "S.tif"]
+    inside = cells[cc.y_px.round().astype(int), cc.x_px.round().astype(int)] == cc.cell
+    check("C1_xy", "every cortex_cells row: x, y lands inside the mask cell with its id", float(inside.mean()), 1.0)
+    check("C1_xy", "centre = the stele centre (500, 500)", (round(cc.centre_x_px.iloc[0]), round(cc.centre_y_px.iloc[0])),
+          (500, 500))
+    r = np.hypot(cc.x_px - cc.centre_x_px, cc.centre_y_px - cc.y_px) * UM
+    check("C1_xy", "r_um = distance of x, y from the centre", float((r - cc.r_um).abs().max()) < 1e-6, True)
+    ang = np.arctan2(cc.centre_y_px - cc.y_px, cc.x_px - cc.centre_x_px) % (2 * np.pi)
+    check("C1_xy", "angle_rad = direction of x, y from the centre", float((ang - cc.angle_rad).abs().max()) < 1e-6, True)
+    check("C1_xy", "dist_from_stele_um = r_um - stele radius (round stele), within 1 px",
+          float((cc.dist_from_stele_um - (cc.r_um - R_STELE * UM)).abs().max()) <= UM, True)
+    ac = pd.read_csv(next((base / "results").glob("all_cells_*.csv")))
+    check("C1_xy", "all_cells.csv has the centre and dist_from_stele_um",
+          all(c in ac.columns for c in ("centre_x_px", "centre_y_px", "dist_from_stele_um")), True)
+
+    # C2: a cell deleted and clicked back comes back at its size (the click grows to where the neighbours start)
+    for layer in (2, 5, 8):
+        c = cells.copy()
+        y, x = at((EDGES[layer - 1] + EDGES[layer]) / 2, 135)
+        a0 = int((c == c[y, x]).sum())
+        P.click_edit(gray, c, region, mx, "Cell", y, x, remove=True)
+        P.click_edit(gray, c, region, mx, "Cell", y, x)
+        check("C2_click_size", f"layer {layer}: clicked-back cell within 1% of the original", int((c == c[y, x]).sum()),
+              a0, .01)
+    c = cells.copy()
+    y, x = at((EDGES[4] + EDGES[5]) / 2, 135)
+    P.click_edit(gray, c, region, mx, "Cell", y, x, remove=True)
+    P.click_edit(gray, c, region, mx, "Cell", y, x)
+    old = cells[y, x]
+    check("C2_click_size", "no neighbour loses a pixel", int(((cells != 0) & (cells != old) & (c != cells)).sum()), 0)
+
+    # C3: an oval stele with layers parallel to it: r_norm stays within 0.03 of the truth; distance from the stele
+    # edge (along the line from the centre) within 4% of the cortex width, and never short
+    c, rg, d, w = oval_section()
+    pr, _, _ = P.derive(c, rg, np.zeros_like(c), 0, None)
+    k = pr[pr.tissue == "cortex"]
+    dt = d[k.y.round().astype(int), k.x.round().astype(int)]
+    check("C3_oval", "r_norm within 0.03 of the truth (95% of cells)", float(np.quantile(np.abs(k.r_norm - dt / w), .95)) <= .03, True)
+    err = k.dist_from_stele_px - dt
+    check("C3_oval", "distance from the stele edge: within 4% of the cortex width (95%)", float(np.quantile(np.abs(err), .95)) <= .04 * w, True)
+    check("C3_oval", "... and never shorter than the true distance by more than 1.5 px", float(err.min()) >= -1.5, True)
+
+    # C4: a stray piece of stele outline in the cortex, a stray piece of root outline outside: nothing moves
+    c0, rg0, d0, w0 = oval_section(150, 150)
+    p0, _, _ = P.derive(c0, rg0, np.zeros_like(c0), 0, None)
+    for name, kw in (("stele fleck", dict(fleck=True)), ("root-outline debris", dict(debris=True))):
+        c, rg, _, _ = oval_section(150, 150, **kw)
+        pr, _, _ = P.derive(c, rg, np.zeros_like(c), 0, None)
+        j = p0.set_index("label").join(pr.set_index("label"), rsuffix="_new")
+        j = j[j.tissue == "cortex"]
+        check("C4_stray_outline", f"{name}: r_norm of every cortical cell unchanged (max shift < 0.01)",
+              float((j.r_norm - j.r_norm_new).abs().max()) < .01, True)
+        check("C4_stray_outline", f"{name}: no cortical cell with a negative distance from the stele",
+              int((pr[pr.tissue == "cortex"].dist_from_stele_px < -1).sum()), 0)
+
+    # C5: a thin inner layer (6 px, endodermis-like, 72 small cells) is cortex, not air space
+    c = cells.copy()
+    c[(RR >= EDGES[0]) & (RR < EDGES[2])] = 0
+    l1, l2 = (RR >= EDGES[0]) & (RR < EDGES[0] + 6), (RR >= EDGES[0] + 6) & (RR < EDGES[2])
+    c[l1] = 90000 + (TH[l1] // 5).astype(int)
+    c[l2] = 91000 + (TH[l2] // 10).astype(int)
+    c[mx > 0] = 0
+    pr, _, _ = P.derive(c, region, mx, 0, None)
+    check("C5_thin_inner_layer", "72 thin inner cells: all cortex",
+          int((pr[pr.label.isin(np.unique(c[l1]))].tissue == "cortex").sum()), 72)
+
+    # C6: a crack all round between layers 4 and 5 (8 px): the cells beyond it stay cortex (were: 'unassigned')
+    c = cells.copy()
+    c[(RR >= EDGES[4] - 8) & (RR < EDGES[4])] = 0
+    pr, _, _ = P.derive(c, region, mx, 0, None)
+    check("C6_crack_all_round", "all 288 cortical cells still cortex", int((pr.tissue == "cortex").sum()), 288)
+    check("C6_crack_all_round", "none unassigned", int((pr.tissue == "unassigned").sum()), 0)
+
+    # C7: the same section at 1/2 and 1/3 size: the same cells found as the same tissues (the epidermis band is in
+    # pixels: at 1/4, epidermis 5 px thick, the outer cortex layer is taken for epidermis; documented limit)
+    for f in (0.5, 1 / 3):
+        sc = lambda a, t: rescale(a, f, order=0, preserve_range=True, anti_aliasing=False).astype(t)
+        pr, _, _ = P.derive(sc(cells, np.int32), sc(region, np.uint8), sc(mx, np.int32), 0, None)
+        check("C7_magnification", f"x{f:.2f}: 288 cortex, 72 epidermis",
+              (int((pr.tissue == "cortex").sum()), int((pr.tissue == "epidermis").sum())), (288, 72))
 
 
 if __name__ == "__main__":

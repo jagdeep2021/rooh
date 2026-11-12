@@ -300,3 +300,29 @@ Rooh started on 2026-10-27 as `cross_section_anatomy`, was briefly renamed JadNa
   reversed. 299 pass.
 - **Re-run:** Make results on every project (per-cell `file`, `file_rel`, Cell area by file, Cells per file, the
   cortex pattern by file change where the stele outline sits off the first cell).
+
+## 2026-11-12 · The cortical cell: clicked size, cracks, stray outline pieces, centre in the CSVs
+
+- **Decision:**
+  1. A cell clicked in grows up to `CLICK_GROW_PX = 5` px into pixels no cell has, after filling its lumen.
+  2. A crack across the cortex no longer leaves the cells beyond it 'unassigned': on each ray the first unreached cell
+     starts a new trace (`derive`).
+  3. Stele and root edges for position are read from the main piece of each outline (`main_piece`).
+  4. `cortex_cells.csv` and `all_cells.csv` gain `centre_x_px`, `centre_y_px` and `dist_from_stele_um`.
+  5. Kept: distance from the stele edge stays along the line from the centre (not the shortest distance).
+- **Why:** an audit of the cortical cell, outside in (Jagdeep): found, placed, sized, findable from its x, y.
+  (1) Hand-clicked cells were 0.79 × the Cellpose area of the same cell on real images (250 cells, Hallie), so reviewed
+  cells came out small. (2) A crack all round lost half the cortex from every cortex number. (3) A slip of the pen or
+  outlined debris moved r_norm of nearby cells by up to 1.2. (4) The CSV could not redraw the root (no centre) and lacked
+  the distance from the stele edge. (5) The two distances differ by ~0.2 cell diameters at the 95th percentile on real
+  roots; the line from the centre keeps r_norm and distance on the same geometry.
+- **Evidence:** `click_area.py` (Hallie, 10 images × 25 cells): area / Cellpose 0.79 → 1.00 at 5 px (per image
+  0.97–1.02), IoU 0.77 → 0.96. Amool's images: the click does not find the cell at all (0.1–0.35 of the area: the wall
+  finder leaks on brightfield and falls back to a disc): open problem, not fixed here. `stele_distance.py`: median +1
+  to +3.5 px, 95th pct 0.15–0.28 cell diameters (A6_5_1, bad stele: 0.71). check_numbers C1–C7 (C2, C4, C6 fail
+  without their fix; C4 without main_piece: 8 cells moved, up to 1.2 in r_norm). On Hallie's examples: 2688 → 2705
+  cortical cells (11 in P10_5_3: real cells in the bottom row, where the root outline sits > 6 px outside them; median
+  cortical area −3.9%, ccfn 7.12 → 7.5 there); ccfn +0.12 on two other images; 2 cells moved in P10_1_2 (a
+  two-piece root outline). 321 pass.
+- **Re-run:** Make results on every project. Cells clicked in before today keep their smaller outline (the mask does
+  not say which cells were clicked); re-click the ones that matter.
