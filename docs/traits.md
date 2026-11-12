@@ -47,9 +47,9 @@ results/
   all_cells_DATE.csv        one row per object, every tissue, kept yes/no
   methods_DATE.txt
   figures/
-  earlier_runs/             outputs of earlier dates (moved here, never deleted)
-  old_format/               anatomy_summary, all_cells.xlsx, cortex_pattern_full: the pre-2026-11-10 workbooks,
-                            kept for ONE release so existing scripts run; the sections below 1-7 describe them
+  earlier_runs/             earlier results, and any old-layout workbook (moved here, never deleted)
+  full/                     only with `summarise.py --full`: anatomy_summary, all_cells.xlsx, cortex_pattern_full,
+                            every intermediate table (the checks and compare.py read these; sections 1-7 below)
 ```
 
 Per image and per quarter only, never per plant: the user joins plant, treatment and anything else on `image_file`
@@ -68,7 +68,7 @@ missed-cell gaps, epidermis mostly missing, lacunae overruled by hand), plus the
 - `Profile`: per image × quarter × bin (10 equal r_norm bins): `n_cells`, `median_area_um2`, `rel`, `few_cells`.
 - `Fitted curves`: the spline at r_norm 0, 0.05 … 1 (`fitted`), per image × quarter: the input for fPCA.
 - `Aerenchyma by position`: per image × bin, `lacuna_share` (kept angles).
-The file and distance bases, `_abs`, `_rel_cortex` and whole-section fits are in `old_format/cortex_pattern_full`.
+The file and distance bases, `_abs`, `_rel_cortex` and whole-section fits are in `full/cortex_pattern_full` (`--full` only).
 
 **Cell CSVs**: `cell`, (`tissue`, `kept`: all_cells only), `quarter`, `x_px`, `y_px`, `angle_rad` (around the stele
 centre, counter-clockwise from the image's right), `r_um` (from the stele centre), `r_norm` (0 stele edge, 1 root

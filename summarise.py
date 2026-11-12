@@ -266,7 +266,7 @@ def start_here(today, n_img, n_rev, no_scale, skipped=(), n_flagged=0):
         ("", f"all_cells_{today}.csv", "the same for every object, with its cell type (tissue) and kept yes/no"),
         ("", f"methods_{today}.txt", "the Methods paragraph for these numbers, with the thresholds used"),
         ("", "figures/", "cortex pattern per group"),
-        ("", "old_format/", "the workbooks from before 2026-11-10, kept for one release: don't start new work on them"),
+        ("", "earlier_runs/", "results of earlier runs, moved out of the way (never deleted)"),
         ("", "README sheet", "every column of this file and of the two CSVs: unit and meaning"),
         ("THIS RUN", f"{n_img} images", f"{n_rev} of {n_img} checked by hand (status = reviewed); the rest are "
                                         "computer outlines only"),
@@ -583,7 +583,7 @@ def write_traits(path: Path, start, check, per_image, per_quarter, file_area, fi
 
 def write_curves(path: Path, prof, feats, curves, aer, t_q, groups, info):
     """cortex_pattern_DATE.xlsx: the quarter rule of the traits file applied to the curves. Position basis, relative
-    size only; the file and distance bases, _abs, _rel_cortex and whole-section fits stay in old_format."""
+    size only; the file and distance bases, _abs, _rel_cortex and whole-section fits are in full/cortex_pattern_full (summarise.py --full)."""
     ids = ["image_file", *groups]
     qs = [f"Q{q}" for q, *_ in P.QUARTERS]
     pos = feats[feats.basis == "position"] if len(feats) else feats
@@ -711,7 +711,7 @@ def to_um(d: dict, s: float) -> dict:
     return out
 
 
-def main(anatomy_dir: Path, image_figures: bool = False):
+def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
     """The project's tables (xlsx) and group figures. image_figures: also one cortex pattern figure per image
     (slow for big sets; the editors draw it live for the image on screen).
     Cortex numbers come from the kept angles only (excluded sectors out, cells by their centre); stele and metaxylem
@@ -893,10 +893,8 @@ def main(anatomy_dir: Path, image_figures: bool = False):
     out_dir = anatomy_dir.parent / "results"
     out_dir.mkdir(exist_ok=True)
     today = dt.date.today().isoformat()
-    old_dir = out_dir / "old_format"           # the pre-2026-11-10 workbooks, kept for one release
-    old_dir.mkdir(exist_ok=True)
     files_out = {
-        f"old_format/cortex_pattern_full_{today}.xlsx": {
+        f"full/cortex_pattern_full_{today}.xlsx": {
             "per_image_profile": (per_image_profile, f"one row per image x basis x scope x bin: every cell outside the "
                                   f"endodermis in the kept angles (centre rule), position: r_norm in {N_BINS} bins (1 = "
                                   "next to the stele); file: one row per cell file. rel = bin median / the image's median "
@@ -918,12 +916,12 @@ def main(anatomy_dir: Path, image_figures: bool = False):
                               "the data): the input for fPCA"),
             "per_plant_profile": (per_plant_profile, "plant x bin: mean of the image medians (display; analyse "
                                   "per_image_profile with plant as the unit)")},
-        f"old_format/all_cells_{today}.xlsx": {
+        f"full/all_cells_{today}.xlsx": {
             "all_cells": (all_cells, "every segmented object: tissue = cortex | stele | epidermis | air_space | "
                           "unassigned | metaxylem, '..._excluded' when its centre is in an excluded sector. angle_rad "
                           "counter-clockwise from the image's right, around the stele centre. r_norm 0 = stele edge, "
                           "1 = root edge along the object's direction. ring = adjacency hops from the stele (gap check, runs high)")},
-        f"old_format/anatomy_summary_{today}.xlsx": {
+        f"full/anatomy_summary_{today}.xlsx": {
             "per_plant": (per_plant, "plant means of per_image; n_reviewed = images checked by hand; "
                           "n_low_coverage = images with too few degrees kept"),
             "per_image": (per_image, "per image. Stele, metaxylem, root_area: whole section. Cortex traits: kept angles "
@@ -936,17 +934,14 @@ def main(anatomy_dir: Path, image_figures: bool = False):
     info = run_info(anatomy_dir, settings)
     n_plant = per_image.groupby(keys, dropna=False).ngroups
     import re
-    earlier = out_dir / "earlier_runs"          # outputs of earlier dates: kept, out of the way (top = this run only)
-    for f in out_dir.iterdir():
+    earlier = out_dir / "earlier_runs"          # earlier outputs: kept, out of the way (top = this run only)
+    for f in out_dir.iterdir():                 # earlier dates, and the old-layout workbooks of any date
         m = re.search(r"_(\d{4}-\d{2}-\d{2})\.(xlsx|csv|txt)$", f.name)
-        if f.is_file() and m and m.group(1) != today \
-                and not (f.name.startswith(("anatomy_summary", "all_cells_")) and f.suffix == ".xlsx") \
-                and not (f.name.startswith("cortex_pattern") and f.suffix == ".xlsx" and _old_pattern(f)):
+        if f.is_file() and m and (m.group(1) != today
+                                  or (f.name.startswith(("anatomy_summary", "all_cells_")) and f.suffix == ".xlsx")
+                                  or (f.name.startswith("cortex_pattern") and f.suffix == ".xlsx" and _old_pattern(f))):
             earlier.mkdir(exist_ok=True)
             f.replace(earlier / f.name)
-    old_pattern = [f for f in out_dir.glob("cortex_pattern_*.xlsx") if _old_pattern(f)]
-    for old in [*out_dir.glob("anatomy_summary_*.xlsx"), *out_dir.glob("all_cells_*.xlsx"), *old_pattern]:
-        old.replace(old_dir / old.name)         # earlier runs' old-format files: out of the way, not deleted
     fcols = lambda df: df[[c for c in df.columns if not c.startswith("file_")] +
                           sorted([c for c in df.columns if c.startswith("file_")], key=lambda c: int(c[5:]))]
     t_image = pd.DataFrame(t_img)
@@ -959,7 +954,9 @@ def main(anatomy_dir: Path, image_figures: bool = False):
     write_curves(out_dir / f"cortex_pattern_{today}.xlsx", per_image_profile, profile_features, spline_curves,
                  aerenchyma_profile, pd.DataFrame(t_q), groups, info)
     write_cell_csvs(out_dir, today, all_cells, groups)
-    for fname, tabs in files_out.items():
+    if full:                                    # summarise.py --full: the long workbooks the checks and compare.py read
+        (out_dir / "full").mkdir(exist_ok=True)
+    for fname, tabs in (files_out.items() if full else ()):
         tabs = {name: (order_cols(df, [*groups, *notes]) if name in ("per_image", "per_plant") else px_last(df), note)
                 for name, (df, note) in tabs.items()}
         readme = pd.DataFrame([(k, "", "", "", n) for k, (_, n) in tabs.items()],
@@ -970,10 +967,10 @@ def main(anatomy_dir: Path, image_figures: bool = False):
                              for name, (df, _) in tabs.items() for c in df.columns],
                             columns=["sheet", "column", "topic", "unit", "what it is"])
         with pd.ExcelWriter(out_dir / fname) as w:
-            pd.DataFrame({"OLD FORMAT": [
-                f"Kept for one release so existing scripts still run (decided 2026-11-10). Use traits_{today}.xlsx, "
-                f"cortex_pattern_{today}.xlsx and the cell CSVs in results/ instead. These files will stop being "
-                "written in the next release."]}).to_excel(w, sheet_name="OLD_FORMAT", index=False)
+            pd.DataFrame({"FULL RECORD": [
+                f"Written only with summarise.py --full: every intermediate table, for the checks and compare.py. "
+                f"For analysis use traits_{today}.xlsx, cortex_pattern_{today}.xlsx and the cell CSVs in results/."
+                ]}).to_excel(w, sheet_name="FULL_RECORD", index=False)
             pd.concat([readme, cols], ignore_index=True).to_excel(w, sheet_name="README", index=False)
             for name, (df, _) in tabs.items():
                 df.to_excel(w, sheet_name=name, index=False)
@@ -1008,4 +1005,4 @@ def main(anatomy_dir: Path, image_figures: bool = False):
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(__doc__)
-    main(Path(sys.argv[1]).resolve(), image_figures="--image-figures" in sys.argv)
+    main(Path(sys.argv[1]).resolve(), image_figures="--image-figures" in sys.argv, full="--full" in sys.argv)

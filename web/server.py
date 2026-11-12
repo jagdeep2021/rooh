@@ -791,7 +791,7 @@ def set_scale(name: str, um_per_px: float = Form(...), group: str = Form(""), re
 
 
 def _result_files(d: Path) -> list:
-    """The current run's outputs (top of results/; old_format/ and earlier_runs/ are not listed)."""
+    """The current run's outputs (top of results/; full/ and earlier_runs/ are not listed)."""
     r = d / "results"
     return sorted(p.name for p in r.iterdir() if p.suffix in (".xlsx", ".csv")) if r.exists() else []
 
