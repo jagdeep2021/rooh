@@ -851,6 +851,12 @@ def cell_checks(base: Path, gray):
     check("C1_xy", "dist_from_stele_um = r_um - stele radius (round stele), within 1 px",
           float((cc.dist_from_stele_um - (cc.r_um - R_STELE * UM)).abs().max()) <= UM, True)
     ac = pd.read_csv(next((base / "results").glob("all_cells_*.csv")))
+    chk = pd.read_excel(next((base / "results").glob("traits_*.xlsx")), sheet_name="Check")
+    check("W4_off_the_image", "Check sheet: frame_deg 0 and no flag for the base section",
+          (int(chk.set_index("image_file").at["S.tif", "frame_deg"]),
+           "off the image" in str(chk.set_index("image_file").at["S.tif", "flags"])), (0, False))
+    t = pd.read_excel(next((base / "results").glob("traits_*.xlsx")), sheet_name="Per image").set_index("image_file")
+    check("W5_root_aspect", "Per image: root_aspect 1.00", float(t.at["S.tif", "root_aspect"]), 1.0, .01)
     check("C1_xy", "all_cells.csv has the centre and dist_from_stele_um",
           all(c in ac.columns for c in ("centre_x_px", "centre_y_px", "dist_from_stele_um")), True)
 
@@ -919,6 +925,35 @@ def cell_checks(base: Path, gray):
         pr, _, _ = P.derive(sc(cells, np.int32), sc(region, np.uint8), sc(mx, np.int32), 0, None)
         check("C7_magnification", f"x{f:.2f}: 288 cortex, 72 epidermis",
               (int((pr.tissue == "cortex").sum()), int((pr.tissue == "epidermis").sum())), (288, 72))
+
+
+    # W: cortex width (2026-11-12). Round: 325 exactly (base). Guards for what moves it, and by how much.
+    def width(rg, arcs=()):
+        ctr = P.centre_of(rg, None)
+        r_st, r_rt = P.radial_profile(rg, ctr)
+        return float(np.mean((r_rt - r_st)[~P.in_arcs(np.arange(360) + .5, arcs)]))
+    _, rg, _, _ = oval_section()                    # cortex truly 325 px thick all round an oval stele
+    check("W1_oval_stele", "width along lines from the centre within 2% of the true thickness", width(rg), 325, .02)
+    rg = region.copy()                              # a lateral root inside the outline (10 deg out to 560)
+    rg[(RR >= EDGES[-1]) & (RR < 560) & (TH >= 70) & (TH < 80)] = 1
+    check("W2_lateral_root_in_outline", "width +0.5% (10 deg bulge): within 1%", width(rg), R_ROOT - R_STELE, .01)
+    rg = region.copy()                              # a torn notch 60 px deep over 20 deg
+    rg[(RR >= 415) & (TH >= 100) & (TH < 120)] = 0
+    check("W3_notch_not_excluded", "a 20-degree tear left in lowers width (by 20/360 x 60 px)", width(rg),
+          R_ROOT - R_STELE - 20 / 360 * 60, .005)
+    check("W3_notch_not_excluded", "... excluded: back to 325", width(rg, [(100, 120, "torn")]), R_ROOT - R_STELE, .005)
+    # W4: the root runs off the image: shifted right so 60 px of it is past the border
+    rg = np.zeros_like(region)
+    rg[:, 85:] = region[:, :-85]
+    ctr = P.centre_of(rg, None)
+    want = int(np.sum(np.abs(np.degrees(np.arccos(np.clip((N - 1 - (C[1] + 85)) / R_ROOT, -1, 1)))) * 2))
+    check("W4_off_the_image", "frame_deg = the degrees whose edge is the border (within 2)", abs(P.frame_deg(rg, ctr) - want) <= 2, True)
+    check("W4_off_the_image", "a root inside the picture: frame_deg 0", P.frame_deg(region, P.centre_of(region, None)), 0)
+    check("W4_off_the_image", "excluded degrees are not counted", P.frame_deg(rg, ctr, [(0, 180, "debris"), (180, 360, "debris")]), 0)
+    # W5: root_aspect: round 1.00; an ellipse 1.25 x stretched reads 1.25
+    check("W5_root_aspect", "round root: 1.00", P.root_aspect(region), 1.0, .01)
+    ell = np.where(((yy - C[0]) / 380) ** 2 + ((xx - C[1]) / 475) ** 2 < 1, 1, 0).astype(np.uint8)
+    check("W5_root_aspect", "ellipse 475 x 380: 1.25", P.root_aspect(ell), 1.25, .01)
 
 
 if __name__ == "__main__":

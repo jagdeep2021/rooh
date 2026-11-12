@@ -326,3 +326,22 @@ Rooh started on 2026-10-27 as `cross_section_anatomy`, was briefly renamed JadNa
   two-piece root outline). 321 pass.
 - **Re-run:** Make results on every project. Cells clicked in before today keep their smaller outline (the mask does
   not say which cells were clicked); re-click the ones that matter.
+
+## 2026-11-12 · Cortex width: checked on reviewed masks; root off the image flagged; root_aspect
+
+- **Decision:** the width rule stays (mean root − stele radius over kept degrees, along lines from the centre,
+  epidermis included). New: `frame_deg` + Check flag "root runs off the image (N deg)"; `root_aspect` (Per image),
+  descriptive only. No slant flag, no correction.
+- **Why:** audit of cortex width (Jagdeep), first on the automatic examples, then, as Jagdeep pointed out, on real
+  (reviewed) masks: Hallie's web project "test", 38 reviewed images. The auto-mask results had overstated a slant
+  problem (3 images); on reviewed masks ovals are normal and the evidence for slant is inconclusive.
+- **Evidence:** `cortex_width.py` → `cortex_width.csv`. Synthetic: oval stele +1.2%, lateral root in the outline
+  +0.5%, a 20° tear left in −0.9%, 60 px off the image −2% (W1–W4). Reviewed: 17/38 run off the image (up to 115°);
+  those degrees are the widest (an oval runs off along its long axis), so dropping them biases low too (median −0.6%,
+  worst −2.8%): flag only. Width varies around the root, coefficient of variation 3–25%. Root aspect 1.02–1.35, 23/38 ≥ 1.15;
+  aspect vs cortical-cell alignment r = 0.46 (n = 38). Within plant, log median cortical cell area on log root aspect:
+  slope +0.22 (95% CI −0.59 to 1.03, P = 0.58, 33 images in 16 plants; a pure slant stretch predicts 1):
+  inconclusive (aspect varies little within a plant, SD 0.05). Settling it needs one root sectioned straight and at a known tilt.
+  Distance from the stele along the line vs shortest: 95th percentile 0.18 cell diameters (median over images): kept.
+  check_numbers W1–W5; 332 pass.
+- **Re-run:** Make results for the new columns; no existing number changes.

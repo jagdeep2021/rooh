@@ -439,6 +439,26 @@ def main_piece(m: np.ndarray) -> np.ndarray:
     return lab == (np.argmax(np.bincount(lab.ravel())[1:]) + 1)
 
 
+def frame_deg(region: np.ndarray, centre, arcs=()) -> int:
+    """Kept whole degrees where the root edge lies on the image's border: the root runs off the picture there and the
+    edge is the frame, not the root (2026-11-12: 17 of Hallie's 38 reviewed images, up to 115 degrees)."""
+    r_rt = radial_profile(region, centre)[1]
+    t = np.radians(np.arange(360))
+    y, x = centre[0] - r_rt * np.sin(t), centre[1] + r_rt * np.cos(t)
+    at = (y <= 1) | (y >= region.shape[0] - 2) | (x <= 1) | (x >= region.shape[1] - 2)
+    return int((at & ~in_arcs(np.arange(360) + 0.5, arcs)).sum())
+
+
+def root_aspect(region: np.ndarray) -> float:
+    """Long / short axis of the root outline (main piece; ellipse with the same second moments). 1 = round. An oval
+    root or a section cut at a slant; the two cannot be told apart from one section (2026-11-12)."""
+    rt = main_piece(region >= 1)
+    if not rt.any():
+        return np.nan
+    p = measure.regionprops(rt.astype(np.uint8))[0]
+    return float(p.axis_major_length / p.axis_minor_length) if p.axis_minor_length > 0 else np.nan
+
+
 def radial_profile(region: np.ndarray, centre, n_angles: int = 360):
     """Stele and root radius (px) at each whole degree, measured from the centre: the outermost pixel of the main
     piece of each outline along the ray."""

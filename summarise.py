@@ -323,11 +323,14 @@ def check_sheet(t_image, per_image, t_q) -> pd.DataFrame:
             f.append("epidermis mostly missing")
         if b.n_lacunae_overridden > 0:
             f.append(f"{b.n_lacunae_overridden:.0f} lacuna(e) overruled by hand")
+        if r.frame_deg > 0:
+            f.append(f"root runs off the image ({r.frame_deg:.0f} deg)")
         rows.append({"image_file": r.image_file, "flags": "; ".join(f),
                      "n_giant_cortex_cells": b.n_giant_cortex_cells, "n_gaps_missed_cell": b.n_gaps_missed_cell,
-                     "epidermis_deg": b.epidermis_deg, "n_lacunae_overridden": b.n_lacunae_overridden})
+                     "epidermis_deg": b.epidermis_deg, "n_lacunae_overridden": b.n_lacunae_overridden,
+                     "frame_deg": r.frame_deg})
     return pd.DataFrame(rows, columns=["image_file", "flags", "n_giant_cortex_cells", "n_gaps_missed_cell",
-                                       "epidermis_deg", "n_lacunae_overridden"])
+                                       "epidermis_deg", "n_lacunae_overridden", "frame_deg"])
 
 
 def methods_text(per_image, n_plant, today):
@@ -395,6 +398,10 @@ TRAITS = {
                          f"= root_area_um2 when nothing is excluded; blank under {P.MIN_EST_DEG} degrees kept",
     "root_diameter_um": "diameter of the circle with root_area_est_um2 (µm)",
     "stele_area_um2": "stele area, whole section (µm²); the stele is never excluded",
+    "root_aspect": "long / short axis of the root outline (1 = round). An oval root or a section cut at a slant: one "
+                   "section cannot tell which (not a correction; use as a covariate if it differs between groups)",
+    "frame_deg": "kept degrees where the root runs off the image (its edge there is the frame): root area and width "
+                 "are short there (width barely: median -0.6% on Hallie's reviewed images)",
     "cortex_area_kept_um2": "root minus stele in the kept angles only (µm²): measured, not estimated",
     "cortex_area_est_um2": "root_area_est_um2 minus stele_area_um2 (µm²)",
     "stele_share": "stele_area / root_area_est (0-1)",
@@ -412,7 +419,8 @@ TRAITS = {
             "cortical cell, a gap between cortical cells (lacuna, missed cell) counted as the cells it would hold (a "
             "gap at the stele edge is not); median over the rays. "
             "Per image: mean of the quarters",
-    "cortex_width_um": "root radius minus stele radius, mean over the kept degrees (µm). Per image: mean of the quarters",
+    "cortex_width_um": "root radius minus stele radius, mean over the kept degrees (µm), epidermis included (cortex = "
+                       "root - stele). Per image: mean of the quarters",
     "median_cortex_cell_area_um2": "median area of the kept cortical cells (µm²). Per image: mean of the quarters",
     "aerenchyma_share": "lacuna pixels / cortex pixels in the kept angles (0-1). Per image: mean of the quarters",
     "quarter": "Q1 = 0-90 degrees (image right to top), then counter-clockwise, around the stele centre",
@@ -473,6 +481,7 @@ def trait_rows(meta, status, s, region, props, mxp, tr, st, centre, arcs, lac, l
            "excluded_sectors": st["excluded_sectors"],
            "root_area_um2": tr["root_area_px"] * um2, "root_area_est_um2": root_full * um2,
            "root_diameter_um": 2 * np.sqrt(root_full / np.pi) * um,
+           "root_aspect": P.root_aspect(region), "frame_deg": P.frame_deg(region, centre, arcs),
            "stele_area_um2": stele * um2 if found else np.nan,
            "cortex_area_kept_um2": st["cortex_area_kept_px"] * um2 if found else np.nan,
            "cortex_area_est_um2": (root_full - stele) * um2 if found else np.nan,
@@ -965,7 +974,7 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
     sh = start_here(today, len(per_image), int((per_image.status == "reviewed").sum()),
                     int(per_image.um_per_px.isna().sum()), skipped,
                     int((check["flags"].str.replace("not reviewed", "").str.strip("; ") != "").sum()))
-    write_traits(out_dir / f"traits_{today}.xlsx", sh, check, t_image, pd.DataFrame(t_q), fcols(pd.DataFrame(t_fa)),
+    write_traits(out_dir / f"traits_{today}.xlsx", sh, check, t_image.drop(columns="frame_deg"), pd.DataFrame(t_q), fcols(pd.DataFrame(t_fa)),
                  fcols(pd.DataFrame(t_fn)), groups, info, today)
     write_curves(out_dir / f"cortex_pattern_{today}.xlsx", per_image_profile, profile_features, spline_curves,
                  aerenchyma_profile, pd.DataFrame(t_q), groups, info)
