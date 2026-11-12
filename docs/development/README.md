@@ -345,3 +345,41 @@ Rooh started on 2026-10-27 as `cross_section_anatomy`, was briefly renamed JadNa
   Distance from the stele along the line vs shortest: 95th percentile 0.18 cell diameters (median over images): kept.
   check_numbers W1–W5; 332 pass.
 - **Re-run:** Make results for the new columns; no existing number changes.
+
+## 2026-11-12 · Stele and metaxylem on reviewed masks; one vessel = one round lumen; results checked against the masks
+
+- **Decision:**
+  1. **Vessel rule** (`clean_vessels`): every vessel the machine makes (auto pass, a click) and every vessel in a mask
+     saved before today: holes filled (where no cell sits), pen strokes thinner than 3 px dropped, two round bodies
+     joined by a neck narrower than 2 × 0.75 × the smaller body's inscribed radius split (watershed on the distance
+     map). Applied on load, so old projects are measured and shown split; the next save stores it.
+  2. **The reviewer has the last word:** a vessel drawn by hand stays exactly as drawn (npz `mx_drawn`, one point per
+     drawn vessel); drawing round two pieces joins them (undoes a wrong split); a drawing that grazes a neighbour no
+     longer swallows it (`draw_vessel`, replacing a merge with anything the drawing touched).
+  3. Check sheet: `vessels_split`, `vessels_dropped`, `drawn_vessels_two_bodies`, each with a flag.
+  4. **Stele is one piece** (`clean_stele`): flecks of stele outline go back to root on load and after stele edits.
+  5. New column `stele_diameter_um` (2√(area/π)).
+  6. Web display cache pictures written whole (temporary file + rename): two requests for one picture had served a
+     half-written file (the app test caught it once the new code made first views slower).
+  7. `tests/check_results.py`: recomputes a real project's results from its masks with plain numpy and compares.
+- **Why:** audit of stele and metaxylem (Jagdeep), on Hallie's reviewed web project "test" (38 images, a copy). The
+  stele-crop montage showed vessels saved two (or three) to one in 17 images; Jagdeep: all of them mistakes, whether
+  made by the auto pass or while editing; prevent them at the source, but the user keeps full control.
+- **Evidence:** `stele_mx.py` → `stele_mx.csv`; `vessel_split.py` → `vessel_split.csv` (figure on request).
+  Vessels 160 → 181 (+22 split, −1 stroke, 6175 hole px filled), 17/38 images change: mean vessel area median −25%,
+  conductance median −31% (0 to −58%). Looked at every changed vessel: 21 of 22 splits right; 1 wrong (p21__A1_8_5, one
+  vessel with a debris rod across it: flagged; redraw it to keep it whole). Shipped examples: Hallie SL-2026-004
+  25 → 27 vessels (2 real merged pairs), Amool's unchanged. Limit: centres closer than ~1.4 radii read as one oval
+  (check_numbers V1). Stele flecks: 3/38 images, up to 165 px, 1 cell tagged stele, centre moved ≤ 0.26 px.
+  Stele: the auto rule on the reviewed cells matches the reviewed stele (IoU ≥ 0.95) in 26/38; 7 < 0.8 (redrawn by
+  Hallie). One cell layer of outline = 28% of stele area (19–43%): where the outline sits dominates stele area.
+  Conductance: a 1 px change in every vessel radius moves it ~9%; the largest vessel carries 37% (median).
+  Reporting: `check_results.py` on the copy with the scale filled in for every image: 2033 checks pass (areas, scale,
+  angles, sectors, centre, cell rows, r_norm and distance within 0.03 / 2 px at the 95th percentile, pattern bins,
+  vessels, lacunae, quarter means). Hallie's project itself: 37 of 38 images have no scale, so its µm columns are blank.
+  check_numbers: V1–V6, S1, case 14; 355 pass. check_app 145 pass.
+- **Not checked yet:** whether tissue tags, cell files (ccfn, cells per file) and lacunae match a person on real
+  images (open problem 7: hand-trace ground truth); vessel area by click runs to mid-wall, the auto rule to the lumen
+  edge (~1 px: ~9% conductance), not yet reconciled.
+- **Re-run:** Make results on every project with vessels (mx_n, vessel areas and conductance change where vessels were
+  merged). Look at images the Check sheet flags for vessels.

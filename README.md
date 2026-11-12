@@ -242,9 +242,13 @@ Everything else is derived by `derive()`, so the editor and the summary always a
 
 Why the measurements are defined the way they are, and how they differ from earlier lab pipelines: [docs/development/](docs/development/README.md).
 
-Two test suites, both on synthetic sections with known answers; run both before a pull request that touches them:
+Two test suites on synthetic sections with known answers (run both before a pull request that touches them), and one
+for a real project:
 
 - `tests/check_numbers.py`: every measurement and output file (~1 min).
+- `tests/check_results.py <project>`: on a **real** project (a copy), after Make results (`--full`): recomputes every
+  pixel count, scale, angle, sector, centre, radial position, pattern bin, vessel and lacuna number from the masks
+  with plain numpy (no Rooh code) and compares (Hallie's 38 reviewed images, 2026-11-12: 2033 pass).
 - `tests/check_app.py [out_dir] [--no-cellpose]`: the whole app in a headless browser, website and desktop.
   It starts its own servers on a scratch folder, so it never touches real projects or `~/.rooh`. Every button,
   shortcut and server route is used at least once and checked on disk (zoom, pan, every edit tool, undo/redo,
