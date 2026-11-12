@@ -62,6 +62,8 @@ COLUMNS = {
     "r_norm": "radial position of the cell centre: 0 = stele edge, 1 = root edge, along its own direction",
     "radial_bin": f"r_norm in {N_BINS} equal bins: 1 = next to the stele",
     "dist_from_stele_um": "distance from the stele edge to the cell centre (µm)",
+    "centre_x_px": "the image's centre (stele centre, or set by hand), pixels from the left edge",
+    "centre_y_px": "the image's centre, pixels from the top edge",
     "area_um2": "cell area (µm², to mid-wall)", "major_um": "cell length, long axis (µm)",
     "minor_um": "cell width, short axis (µm)",
     "root_area_um2": "whole cross-section area as outlined (µm²); with excluded sectors use root_area_est_um2",
@@ -505,6 +507,12 @@ CELLS = {   # the two cell CSVs (described in the traits README)
     "y_px": "centre, pixels from the image's top edge",
     "angle_rad": "direction of the centre from the stele centre, radians, counter-clockwise from the image's right",
     "r_um": "distance of the centre from the stele centre (µm)",
+    "centre_x_px": "the image's centre for angles and distances (the stele centre, or the one set by hand), pixels "
+                   "from the left edge: x_px - centre_x_px, centre_y_px - y_px give the cell's place in the root",
+    "centre_y_px": "the same, pixels from the top edge",
+    "dist_from_stele_um": "distance from the stele edge to the cell centre (µm), along the line from the centre "
+                          "through the cell (on an oval stele up to ~0.2 cell diameters longer than the shortest "
+                          "distance on the flanks)",
     "r_norm": "radial position: 0 = stele edge, 1 = root edge, both read along the cell's own direction",
     "file": "estimated cell file number (1 = next to the stele; cortex and epidermis only): the median of the "
             "cell's numbers on rays every 0.5 degrees, a gap between cells counted as the cells it would hold",
@@ -632,9 +640,10 @@ def write_curves(path: Path, prof, feats, curves, aer, t_q, groups, info):
                       CURVE_SHEETS, CURVES, groups, info)
 
 
-CORTEX_CSV = ["cell", "quarter", "x_px", "y_px", "angle_rad", "r_um", "r_norm", "file", "area_px", "area_um2"]
-ALL_CSV = ["cell", "tissue", "kept", "quarter", "x_px", "y_px", "angle_rad", "r_um", "r_norm", "file", "area_px",
-           "area_um2"]
+CORTEX_CSV = ["cell", "quarter", "x_px", "y_px", "centre_x_px", "centre_y_px", "angle_rad", "r_um",
+              "dist_from_stele_um", "r_norm", "file", "area_px", "area_um2"]
+ALL_CSV = ["cell", "tissue", "kept", "quarter", "x_px", "y_px", "centre_x_px", "centre_y_px", "angle_rad", "r_um",
+           "dist_from_stele_um", "r_norm", "file", "area_px", "area_um2"]
 
 
 def write_cell_csvs(out_dir: Path, today, all_cells, groups):
@@ -855,11 +864,11 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
                 allc[k] = np.nan
         allc = allc.assign(area_um2=allc.area_px * s * s, major_um=allc.major_px * s, minor_um=allc.minor_px * s,
                            r_um=allc.r_px * s, dist_from_stele_um=allc.dist_from_stele_px * s,
-                           angle_deg=np.degrees(allc.angle_rad))
+                           angle_deg=np.degrees(allc.angle_rad), centre_x_px=centre[1], centre_y_px=centre[0])
         all_rows.append(allc.assign(**meta, tech_rep=tech, status=status)[
             [*meta, "tech_rep", "status", "label", "tissue", "sector", "ring", "x", "y",
              "angle_rad", "angle_deg", "quarter", "r_px", "r_um", "r_norm", "dist_from_stele_um", "file", "file_rel",
-             "n_rays", "area_px", "area_um2", "major_um", "minor_um"]])
+             "n_rays", "area_px", "area_um2", "major_um", "minor_um", "centre_x_px", "centre_y_px"]])
 
         c = props[props.tissue == "cortex"].copy()
         c["area_um2"] = c.area_px * s * s

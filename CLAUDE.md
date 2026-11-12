@@ -83,14 +83,18 @@ Read this at the start of every session. Claude Code loads it automatically.
    and file number starts at the stele.
 2. Gap-aware CCFN: `n_cortical_layers` counts only cells present, so aerenchyma lowers it (B73 R1: 8–9 with lacunae vs
    12). Proposal: the median file number of the outermost cortical file over kept rays, added beside it.
-3. Cortex pulled away from the stele: the gap-aware file rule counts the gap as cells (phantom files). Needs a
-   synthetic case and a flag (a gap at the stele edge on more than X% of rays).
+3. (Done 2026-11-11: the gap at the stele edge no longer counts as cells, in ccfn or cell files; T5b.) Still open: a
+   flag when the cortex sits away from the stele on many rays (usually a stele drawn too small).
 4. The lacuna rule cannot tell aerenchyma from patches of cells Cellpose missed; reviewers override by hand
    (`n_lacunae_overridden`).
 5. Provenance stops at Make results: `run_info` has the Rooh commit, but masks (`.npz`) don't record the version
    that outlined them or last edited them, `run_info` lacks the Cellpose version/model, the page doesn't show the
    live version, and `run_info` still links the old repo name. Proposal: stamp `outlined_with` / `edited_with` in
    each npz (per-image columns), Cellpose version in `run_info`, version in the page footer.
+6. Clicking a cell in does not work on brightfield JPGs (Amool): the wall finder (`wall_mask`) leaks, the click falls
+   back to a 10 px disc (0.1–0.35 of the cell). Draw cells there instead (2026-11-12, `docs/development/click_area.py`).
+7. No real ground truth for cell finding: synthetic sections only. Hand-trace one quarter of 3 Hallie images and score
+   Cellpose against it (`tests/score_against_truth.py` takes a truth project).
 
 ## Working with this lab
 
