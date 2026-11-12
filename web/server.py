@@ -268,12 +268,20 @@ def _cache(d: Path, key: str, kind: str) -> Path:
     return _cache_dir(d) / f"{key}.{kind}.png"
 
 
+def _write_png(f: Path, save) -> None:
+    """Write a cached picture whole or not at all: save(path) writes a temporary file, then it is renamed in. Two
+    requests for the same picture (fast arrows) had one served a half-written file: a broken image (2026-11-12)."""
+    tmp = f.with_name(f"{f.stem}.{os.getpid()}.{threading.get_ident()}.part.png")
+    save(tmp)
+    os.replace(tmp, f)
+
+
 def gray_png(d: Path, rel: str) -> Path:
     f = _cache(d, RB.image_key(Path(rel)), "gray")
     src = _raw(d) / rel
     if not f.exists() or f.stat().st_mtime < src.stat().st_mtime:
         g = P.load_gray(src)                          # what the model saw: stretched, CLAHE
-        Image.fromarray((g * 255).astype(np.uint8)).save(f, optimize=True)
+        _write_png(f, lambda t: Image.fromarray((g * 255).astype(np.uint8)).save(t, optimize=True))
     return f
 
 
@@ -325,7 +333,7 @@ def overlay_png(d: Path, rel: str, part: str) -> Path:
         edge = lambda m: ndi.binary_dilation(find_boundaries(m, mode="inner") & m, iterations=w) & m
         rgba[edge(region >= 1)] = OVERLAY["root"]
         rgba[edge(region == 2)] = OVERLAY["stele"]
-    Image.fromarray(rgba, "RGBA").save(f, optimize=True)
+    _write_png(f, lambda t: Image.fromarray(rgba, "RGBA").save(t, optimize=True))
     return f
 
 
@@ -662,7 +670,7 @@ def pattern(name: str, rel: str, u: dict = Depends(user)):
         *_, arcs, props, _ = _live(d, npz)
         fig, ax = plt.subplots(figsize=(3.4, 2.8), dpi=150, layout="constrained")
         PP.live_pattern(ax, props, arcs, P.um_per_px(d / "anatomy", rel), SUM.N_BINS)
-        fig.savefig(f)
+        _write_png(f, lambda t: fig.savefig(t))
         plt.close(fig)
     return FileResponse(f, headers={"Cache-Control": "no-cache"})
 
@@ -731,18 +739,21 @@ def edit(name: str, rel: str = Form(...), target: str = Form(...), points: str =
         return {**traits(name, rel, u), "note": note, "undo": _undo_left(d, npz)}
     cells, region, mx = cells.copy(), region.copy(), mx.copy()
     note = ""
+    keep = P.load_drawn_mx(npz)                    # vessels drawn by hand stay as drawn (pipeline.clean_vessels)
     if len(pts) == 1:
         y, x = (int(round(v)) for v in pts[0])
         if not (0 <= y < cells.shape[0] and 0 <= x < cells.shape[1]):
             raise HTTPException(400, "Click on the image.")
         gray = P.load_gray(_raw(d) / rel) if target != "Root" else None
-        note = P.click_edit(gray, cells, region, mx, target, y, x, remove)
+        note = P.click_edit(gray, cells, region, mx, target, y, x, remove, keep)
     else:
         m = P.outline_mask(pts, region.shape)
         if m.sum() < 10:
             raise HTTPException(400, "That outline is too small.")
-        P.outline_edit(cells, region, mx, target, m, remove)
-    _save(d, npz, cells=cells, region=region, mx=mx)
+        kp = P.outline_edit(cells, region, mx, target, m, remove)
+        if kp is not None:
+            keep.append(kp)
+    _save(d, npz, cells=cells, region=region, mx=mx, **P.drawn_mx_arrays(keep, mx))
     return {**traits(name, rel, u), "note": note, "undo": _undo_left(d, npz)}
 
 

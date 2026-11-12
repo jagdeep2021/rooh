@@ -173,6 +173,7 @@ def propose(path, diameter: float | None = None, model_path: str | None = None):
         cells[np.isin(cells, [c for c, f in frac.items() if f > 0.5])] = 0
     cells = segmentation.relabel_sequential(cells)[0].astype(np.uint16)
     mx = measure.label(morphology.closing(mx > 0, morphology.disk(2))).astype(np.uint16)  # one id per vessel
+    mx = clean_vessels(mx, cells)[0]       # the closing can join two lumens across a thin wall: split them again
     region = root.astype(np.uint8) + stele.astype(np.uint8)
     return gray, cells, region, mx
 
@@ -298,7 +299,76 @@ def vessel_space(gray, cells, mx, y, x, max_area: int):
     return out
 
 
-def add_mx(gray, mx, cells, y, x) -> int:
+VESSEL_SPLIT_NECK = 0.75   # two round bodies joined by a neck narrower than 2 x 0.75 x the smaller body's inscribed
+                           # radius are two vessels (2026-11-12: ~20 merged pairs in Hallie's 38 reviewed images, all
+                           # mistakes; one oval vessel has no such neck)
+VESSEL_MIN_R = 3           # px: a 'vessel' whose largest inscribed circle is thinner is a pen stroke, not a lumen
+
+
+def vessel_bodies(m: np.ndarray):
+    """Round bodies of one vessel mask: (distance map, [peak (y, x)]). Peaks of the distance to the edge, merged when
+    the path between them stays wider than VESSEL_SPLIT_NECK x the smaller one (an oval keeps one body)."""
+    from skimage.feature import peak_local_max
+    dt = ndi.distance_transform_edt(np.pad(m, 1))[1:-1, 1:-1]
+    R = dt.max()
+    pk = peak_local_max(dt, min_distance=max(3, int(0.5 * R)), threshold_abs=0.5 * R, exclude_border=False)
+    keep = []
+    for p in sorted(pk, key=lambda p: -dt[tuple(p)]):
+        same = False
+        for q in keep:
+            n = int(np.hypot(*(p - q))) + 2
+            line = dt[np.linspace(p[0], q[0], n).round().astype(int), np.linspace(p[1], q[1], n).round().astype(int)]
+            if line.min() > VESSEL_SPLIT_NECK * min(dt[tuple(p)], dt[tuple(q)]):
+                same = True
+                break
+        if not same:
+            keep.append(p)
+    return dt, keep
+
+
+def clean_vessels(mx: np.ndarray, cells: np.ndarray | None = None, keep=()):
+    """The vessel rule for vessels the machine made (auto pass, a click) and for masks saved before 2026-11-12: holes
+    filled (a bright speck in a lumen is lumen) where no cell sits, pen strokes thinner than VESSEL_MIN_R dropped, and
+    a vessel with two round bodies split between them (watershed on the distance map). A vessel the reviewer drew
+    (one of the keep points (y, x) lies in it) is the reviewer's call and stays exactly as drawn; one with two bodies
+    is only counted (kept_two_bodies) for the Check sheet. Returns (mx, counts)."""
+    from skimage.segmentation import watershed
+    out = np.zeros(mx.shape, np.uint16)
+    n = {"split": 0, "dropped": 0, "holes_px": 0, "kept_two_bodies": 0}
+    drawn = {int(mx[int(y), int(x)]) for y, x in keep
+             if 0 <= int(y) < mx.shape[0] and 0 <= int(x) < mx.shape[1]} - {0}
+    k = 0
+    for g in measure.regionprops(mx):
+        sl = g.slice
+        if g.label in drawn:
+            k += 1
+            out[sl][g.image] = k
+            n["kept_two_bodies"] += len(vessel_bodies(g.image)[1]) > 1
+            continue
+        m = ndi.binary_fill_holes(g.image)
+        if cells is not None:
+            m &= g.image | (cells[sl] == 0)
+        dt, peaks = vessel_bodies(m)
+        if dt.max() < VESSEL_MIN_R:
+            n["dropped"] += 1
+            continue
+        n["holes_px"] += int(m.sum() - g.image.sum())
+        if len(peaks) > 1:
+            mk = np.zeros(m.shape, int)
+            for i, p in enumerate(peaks, 1):
+                mk[tuple(p)] = i
+            lab = watershed(-dt, mk, mask=m)
+            n["split"] += len(peaks) - 1
+        else:
+            lab = m.astype(int)
+        for i in range(1, lab.max() + 1):
+            k += 1
+            sub = out[sl]
+            sub[(lab == i) & (sub == 0)] = k
+    return out, n
+
+
+def add_mx(gray, mx, cells, y, x, keep=()) -> int:
     reg = vessel_space(gray, cells, mx, y, x, 60 * typical_cell_area(cells))
     if reg is None:                                  # e.g. a click on a wall: the older darkness-only rule
         reg = vessel_at(gray, y, x, 60 * typical_cell_area(cells))
@@ -307,7 +377,42 @@ def add_mx(gray, mx, cells, y, x) -> int:
     new = int(mx.max()) + 1
     mx[reg & (mx == 0)] = new
     cells[reg] = 0
+    mx[:] = clean_vessels(mx, cells, keep)[0]
     return new
+
+
+VESSEL_DRAW_JOIN = 0.25    # a drawn vessel joins an existing one it covers by >= 25% of either (a redraw or an
+                           # extension); a smaller overlap is a slip onto the neighbour, which keeps its pixels
+
+
+def draw_vessel(cells, mx, m: np.ndarray):
+    """A vessel drawn by hand (in place): exactly the drawn area, joined with any vessel it mostly redraws, never
+    swallowing a neighbour it only grazes (2026-11-12: drawn outlines had merged neighbouring vessels). Returns the
+    point (y, x) that marks it as drawn (keep it in the npz: mx_drawn), or None if nothing was left to take."""
+    hit = {int(l): int((mx[m] == l).sum()) for l in np.unique(mx[m]) if l}
+    join = [l for l, o in hit.items() if o >= VESSEL_DRAW_JOIN * min((mx == l).sum(), m.sum())]
+    take_px = m & ((mx == 0) | np.isin(mx, join))
+    if not take_px.any():
+        return None
+    new = int(mx.max()) + 1
+    mx[np.isin(mx, join)] = new
+    mx[take_px] = new
+    cells[take_px] = 0
+    v = mx == new
+    dt = ndi.distance_transform_edt(np.pad(v, 1))[1:-1, 1:-1]
+    return tuple(int(i) for i in np.unravel_index(np.argmax(dt), dt.shape))
+
+
+def load_drawn_mx(npz_path) -> list:
+    """Points (y, x), one inside each vessel drawn by hand: those vessels stay as drawn (none in older files)."""
+    z = np.load(npz_path, allow_pickle=False)
+    return [tuple(map(int, p)) for p in z["mx_drawn"]] if "mx_drawn" in z else []
+
+
+def drawn_mx_arrays(pts, mx=None) -> dict:
+    """The drawn-vessel points as an npz field; with mx, points no longer on a vessel (it was removed) are dropped."""
+    pts = [p for p in pts if mx is None or mx[int(p[0]), int(p[1])]]
+    return {"mx_drawn": np.asarray(pts, int).reshape(-1, 2)}
 
 
 # ---------------------------------------------------------------- derive (used by auto pass and review)
@@ -1117,9 +1222,11 @@ def edit_region(region: np.ndarray, m: np.ndarray, target: str, remove: bool = F
     if target == "Stele":
         if remove:
             region[m & (region == 2)] = 1
+            region[:] = clean_stele(region)       # a cut that leaves a sliver: the sliver goes
         else:
             region[region == 2] = 1
             region[m & (region >= 1)] = 2
+            region[:] = clean_stele(region)
     elif target == "Root":
         if remove:
             region[m] = 0
@@ -1144,7 +1251,7 @@ def take(arr: np.ndarray, m: np.ndarray, merge: bool) -> int:
     return new
 
 
-def click_edit(gray, cells, region, mx, target: str, y: int, x: int, remove: bool = False) -> str:
+def click_edit(gray, cells, region, mx, target: str, y: int, x: int, remove: bool = False, keep=()) -> str:
     """A click at (y, x) on Cell / Metaxylem / Stele, in place. The desktop editor and the web page share it.
     Cell: fill the lumen out to its walls (remove: the cell under the click goes). Metaxylem: same for a vessel.
     Stele / Root: outlines only, so a click just says how to draw one. Returns a note."""
@@ -1158,7 +1265,7 @@ def click_edit(gray, cells, region, mx, target: str, y: int, x: int, remove: boo
         if remove and mx[y, x]:
             mx[mx == mx[y, x]] = 0
         elif not remove and not mx[y, x]:
-            add_mx(gray, mx, cells, y, x)
+            add_mx(gray, mx, cells, y, x, keep)
     elif target in ("Stele", "Root"):
         return f"{target}: Shift-drag around the {target.lower()} to draw its outline (it replaces the old one)."
     else:
@@ -1166,10 +1273,10 @@ def click_edit(gray, cells, region, mx, target: str, y: int, x: int, remove: boo
     return ""
 
 
-def outline_edit(cells, region, mx, target: str, m: np.ndarray, remove: bool = False) -> None:
+def outline_edit(cells, region, mx, target: str, m: np.ndarray, remove: bool = False):
     """A drawn outline m on Cell / Metaxylem / Stele / Root, in place (shared by desktop and web).
-    Cell: a new cell (remove: clear the area). Metaxylem: a vessel, merged with any it overlaps, no longer a cell
-    (remove: clear). Stele / Root: edit_region."""
+    Cell: a new cell (remove: clear the area). Metaxylem: draw_vessel, a vessel exactly as drawn, no longer a cell;
+    returns the drawn-vessel point to keep (remove: clear). Stele / Root: edit_region."""
     if target == "Cell":
         if remove:
             cells[m] = 0
@@ -1179,8 +1286,7 @@ def outline_edit(cells, region, mx, target: str, m: np.ndarray, remove: bool = F
         if remove:
             mx[m] = 0
         else:
-            take(mx, m, merge=True)
-            cells[m] = 0
+            return draw_vessel(cells, mx, m)
     elif target in ("Stele", "Root"):
         edit_region(region, m, target, remove)
     else:
@@ -1197,8 +1303,30 @@ def save_edit(npz_path, **changes) -> None:
 
 
 def load_state(npz_path):
+    """cells, region, mx, status. Vessels pass clean_vessels (2026-11-12), so masks saved before the rule, with
+    merged pairs or pen strokes, are measured and shown as the rule makes them; the next save stores them so.
+    Vessels drawn by hand (mx_drawn) are left as drawn; the stele is its main piece (clean_stele)."""
     z = np.load(npz_path, allow_pickle=False)
-    return z["cells"], z["region"], z["mx"], str(z["status"])
+    keep = [tuple(map(int, p)) for p in z["mx_drawn"]] if "mx_drawn" in z else []
+    return z["cells"], clean_stele(z["region"]), clean_vessels(z["mx"], z["cells"], keep)[0], str(z["status"])
+
+
+def clean_stele(region: np.ndarray) -> np.ndarray:
+    """The stele is one piece: stray flecks of stele outline (2026-11-12: 3 of Hallie's 38 reviewed images, up to 165
+    px; one tagged a cortical cell 'stele' and moved the centre 0.26 px) go back to root. Edges already used the main
+    piece (main_piece, 2026-11-12); now the centre, the tissue tags and the area do too."""
+    st = region == 2
+    if not st.any():
+        return region
+    region = region.copy()
+    region[st & ~main_piece(st)] = 1
+    return region
+
+
+def vessel_fixes(npz_path) -> dict:
+    """What clean_vessels changed in a saved mask: vessels split off, strokes dropped, hole pixels filled."""
+    z = np.load(npz_path, allow_pickle=False)
+    return clean_vessels(z["mx"], z["cells"], load_drawn_mx(npz_path))[1]
 
 
 def qc_png(gray, cells, region, mx, props, traits, out_png, title=""):

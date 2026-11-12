@@ -18,8 +18,9 @@ explains how they came about.
 | **Cells** | Cellpose (cpsam model) on the grey image. One label per cell; masks run to mid-wall. |
 | **Root outline** | Bright walls (Li threshold on the smoothed image) or any cell, closed (15 px), holes filled, largest piece kept, opened (5 px). |
 | **Stele** | Everything inside the outer edge of the endodermis (the endodermis counts as stele). Auto: the cluster of small cells near the root centre (Otsu on log cell area, cells within 0.7 of the root radius), closed, filled, convex hull. **Misses on brightfield: draw it by hand.** |
-| **Metaxylem** | Dark lumens inside the stele larger than 5× the median stele cell, solidity > 0.85, eccentricity < 0.85. |
+| **Metaxylem** | Dark lumens inside the stele larger than 5× the median stele cell, solidity > 0.85, eccentricity < 0.85. **One vessel = one round lumen** (since 2026-11-12, `clean_vessels`): every vessel the machine makes (auto pass, a click) and every vessel in a mask saved before that date has holes filled (where no cell sits), pen strokes thinner than 3 px dropped, and two round bodies joined by a neck narrower than 2 × 0.75 × the smaller body's inscribed radius split between them. **A vessel drawn by hand stays exactly as drawn** (the reviewer has the last word; recorded in the npz as `mx_drawn`); drawing round two pieces joins them, and a drawing that only grazes a neighbour leaves the neighbour whole. Limit: two vessels overlapping so deeply that their centres are closer than ~1.4 radii read as one oval. |
 | **Centre** | The stele centroid (the root centroid if there is no stele), unless the user set one. All angles and radial positions are measured from it. |
+| **Stele as one piece** | Since 2026-11-12 stray flecks of stele outline (a slip of the pen) go back to root on load and after every stele edit (`clean_stele`): centre, tissue tags, area and edges all use the one stele. |
 | **Excluded sectors** | Arcs of angle around the centre taken out by hand, each with a technical reason (torn, folded, smeared / oblique, out of focus, debris, other). **Biology is never a reason.** A cell is in or out by its centre. They affect the cortex, epidermis, air spaces and unassigned cells only; the stele and metaxylem are always whole-section. |
 
 **Tissue of each cell** (one per cell, in this order):
@@ -67,6 +68,9 @@ missed-cell gaps, epidermis mostly missing, lacunae overruled by hand), plus the
 `frame_deg`: kept degrees where the root runs off the image (flag "root runs off the image"). The edge there is the
 frame: root area is short; width barely moves (those are the widest degrees of an oval root; leaving them out biases
 width low too: median −0.6%, worst −2.8% on Hallie's 38 reviewed images), so width keeps them.
+`vessels_split`, `vessels_dropped`: what the vessel rule changed in the saved mask (flags "N vessel(s) split: two saved
+as one", "N pen stroke(s) saved as a vessel, dropped"); `drawn_vessels_two_bodies`: vessels drawn by hand that hold two
+round lumens, kept as drawn (flag "drawn vessel(s) with two lumens, kept as drawn"). Look at those images.
 
 **cortex_pattern** (the curves, quarter rules as below; position basis, relative size):
 - `Curve features`: per image × quarter (+ `image` = the mean of the quarters; its `kept_deg` and `n_cells` are the
@@ -98,12 +102,13 @@ are kept**. Nothing per quarter is estimated. Per-image cortex traits = the mean
 | `root_area_est_um2` | **Fill the edge**: kept angles counted pixel by pixel; across each excluded arc the root radius (from the centre, 0.25° steps) is interpolated linearly between the kept radii on either side, and the wedge adds ½ (r + 0.5)² Δθ. Equals `root_area_um2` when nothing is excluded. Blank under 180° kept. (Tested against scaling by angle: `docs/development/area_estimate.py`.) |
 | `root_diameter_um` | 2√(`root_area_est` / π). |
 | `root_aspect` | Long / short axis of the root outline (main piece; the ellipse with the same second moments). 1 = round. An oval root and a section cut at a slant look the same in one section: descriptive, not a correction (2026-11-12: 23 of Hallie's 38 reviewed roots ≥ 1.15; within a plant, cell area did not follow it, slope +0.22, 95% CI −0.59 to 1.03, *n* = 33 images in 16 plants: inconclusive). |
-| `stele_area_um2` | Whole section. |
+| `stele_area_um2` | Whole section. Moving the outline by one cell layer changes it by ~28% (median over Hallie's 38 reviewed images, 19–43%): where the outline sits (outer edge of the endodermis) matters more than anything else here. |
+| `stele_diameter_um` | 2√(`stele_area` / π). |
 | `cortex_area_kept_um2` | Root outside the stele, kept angles only: measured. |
 | `cortex_area_est_um2` | `root_area_est` − stele. |
 | `stele_share` | stele / `root_area_est`. |
 | `cortex_stele_ratio` | `cortex_area_est` / stele. |
-| `mx_n`, `mx_area_mean_um2`, `mx_area_median_um2`, `mx_area_max_um2`, `mx_area_total_um2` | Metaxylem vessels, whole section: count and per-vessel area statistics. |
+| `mx_n`, `mx_area_mean_um2`, `mx_area_median_um2`, `mx_area_max_um2`, `mx_area_total_um2` | Metaxylem vessels, whole section: count and per-vessel area statistics, after the vessel rule (section 0). |
 | `axial_conductance_m4_MPa_s` | Hagen–Poiseuille, π Σ r⁴ / (8 η): r from each vessel's area (equivalent circle), η = water at 20 °C (1.002 mPa s); m⁴ MPa⁻¹ s⁻¹ (Tyree & Zimmermann 2002). A theoretical maximum: no end walls, pits or lumen shape. |
 | `n_quarters_used` | Quarters with ≥ 45° kept. |
 | `ccfn`, `cortex_width_um`, `median_cortex_cell_area_um2`, `aerenchyma_share` | Mean of the quarter values (below). |

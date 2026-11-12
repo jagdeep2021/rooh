@@ -325,12 +325,20 @@ def check_sheet(t_image, per_image, t_q) -> pd.DataFrame:
             f.append(f"{b.n_lacunae_overridden:.0f} lacuna(e) overruled by hand")
         if r.frame_deg > 0:
             f.append(f"root runs off the image ({r.frame_deg:.0f} deg)")
+        if r.vessels_split > 0:
+            f.append(f"{r.vessels_split:.0f} vessel(s) split: two saved as one")
+        if r.vessels_dropped > 0:
+            f.append(f"{r.vessels_dropped:.0f} pen stroke(s) saved as a vessel, dropped")
+        if r.drawn_vessels_two_bodies > 0:
+            f.append(f"{r.drawn_vessels_two_bodies:.0f} drawn vessel(s) with two lumens, kept as drawn")
         rows.append({"image_file": r.image_file, "flags": "; ".join(f),
                      "n_giant_cortex_cells": b.n_giant_cortex_cells, "n_gaps_missed_cell": b.n_gaps_missed_cell,
                      "epidermis_deg": b.epidermis_deg, "n_lacunae_overridden": b.n_lacunae_overridden,
-                     "frame_deg": r.frame_deg})
+                     "frame_deg": r.frame_deg, "vessels_split": r.vessels_split,
+                     "vessels_dropped": r.vessels_dropped, "drawn_vessels_two_bodies": r.drawn_vessels_two_bodies})
     return pd.DataFrame(rows, columns=["image_file", "flags", "n_giant_cortex_cells", "n_gaps_missed_cell",
-                                       "epidermis_deg", "n_lacunae_overridden", "frame_deg"])
+                                       "epidermis_deg", "n_lacunae_overridden", "frame_deg", "vessels_split",
+                                       "vessels_dropped", "drawn_vessels_two_bodies"])
 
 
 def methods_text(per_image, n_plant, today):
@@ -398,10 +406,16 @@ TRAITS = {
                          f"= root_area_um2 when nothing is excluded; blank under {P.MIN_EST_DEG} degrees kept",
     "root_diameter_um": "diameter of the circle with root_area_est_um2 (µm)",
     "stele_area_um2": "stele area, whole section (µm²); the stele is never excluded",
+    "stele_diameter_um": "diameter of the circle with the stele's area (µm)",
     "root_aspect": "long / short axis of the root outline (1 = round). An oval root or a section cut at a slant: one "
                    "section cannot tell which (not a correction; use as a covariate if it differs between groups)",
     "frame_deg": "kept degrees where the root runs off the image (its edge there is the frame): root area and width "
                  "are short there (width barely: median -0.6% on Hallie's reviewed images)",
+    "vessels_split": "vessels the mask held as one that the vessel rule split (two round lumens joined by a neck: "
+                     "two vessels saved as one). mx_n and the vessel areas count them split; look at the image",
+    "vessels_dropped": "pen strokes saved as a vessel (thinner than 3 px), left out of the vessel traits",
+    "drawn_vessels_two_bodies": "vessels drawn by hand that hold two round lumens: kept as drawn (the reviewer's "
+                                "call), counted here so a slip can be seen",
     "cortex_area_kept_um2": "root minus stele in the kept angles only (µm²): measured, not estimated",
     "cortex_area_est_um2": "root_area_est_um2 minus stele_area_um2 (µm²)",
     "stele_share": "stele_area / root_area_est (0-1)",
@@ -483,6 +497,7 @@ def trait_rows(meta, status, s, region, props, mxp, tr, st, centre, arcs, lac, l
            "root_diameter_um": 2 * np.sqrt(root_full / np.pi) * um,
            "root_aspect": P.root_aspect(region), "frame_deg": P.frame_deg(region, centre, arcs),
            "stele_area_um2": stele * um2 if found else np.nan,
+           "stele_diameter_um": 2 * np.sqrt(stele / np.pi) * um if found else np.nan,
            "cortex_area_kept_um2": st["cortex_area_kept_px"] * um2 if found else np.nan,
            "cortex_area_est_um2": (root_full - stele) * um2 if found else np.nan,
            "stele_share": stele / root_full if found else np.nan,
@@ -766,6 +781,7 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
             skipped.append((rel, "include = no" if rel in samples.index else "not in samples.xlsx"))
             continue
         cells, region, mx, status = P.load_state(f)
+        vf = P.vessel_fixes(f)                    # what the vessel rule changed in the saved mask (Check sheet)
         marks = P.load_not_lacuna(f)              # reviewer's 'not a lacuna' marks
         drawn = P.load_drawn_lacuna(f)            # reviewer's drawn lacunae (count whatever the rules say)
         centre = P.centre_of(region, P.load_centre(f))
@@ -835,7 +851,8 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
         ti, tq, tfa, tfn = trait_rows({"image_file": rel, **{g: samples.at[rel, g] for g in groups}}, status, s,
                                       region, props, mxp, tr, st, centre, arcs, lac, lmask, cells,
                                       fl.attrs["ray_files"])
-        t_img.append(ti)
+        t_img.append({**ti, "vessels_split": vf["split"], "vessels_dropped": vf["dropped"],
+                      "drawn_vessels_two_bodies": vf["kept_two_bodies"]})
         t_q += tq
         t_fa.append(tfa)
         t_fn.append(tfn)
@@ -974,7 +991,7 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
     sh = start_here(today, len(per_image), int((per_image.status == "reviewed").sum()),
                     int(per_image.um_per_px.isna().sum()), skipped,
                     int((check["flags"].str.replace("not reviewed", "").str.strip("; ") != "").sum()))
-    write_traits(out_dir / f"traits_{today}.xlsx", sh, check, t_image.drop(columns="frame_deg"), pd.DataFrame(t_q), fcols(pd.DataFrame(t_fa)),
+    write_traits(out_dir / f"traits_{today}.xlsx", sh, check, t_image.drop(columns=["frame_deg", "vessels_split", "vessels_dropped", "drawn_vessels_two_bodies"]), pd.DataFrame(t_q), fcols(pd.DataFrame(t_fa)),
                  fcols(pd.DataFrame(t_fn)), groups, info, today)
     write_curves(out_dir / f"cortex_pattern_{today}.xlsx", per_image_profile, profile_features, spline_curves,
                  aerenchyma_profile, pd.DataFrame(t_q), groups, info)

@@ -93,7 +93,10 @@ Read this at the start of every session. Claude Code loads it automatically.
    each npz (per-image columns), Cellpose version in `run_info`, version in the page footer.
 6. Clicking a cell in does not work on brightfield JPGs (Amool): the wall finder (`wall_mask`) leaks, the click falls
    back to a 10 px disc (0.1–0.35 of the cell). Draw cells there instead (2026-11-12, `docs/development/click_area.py`).
-7. No real ground truth for cell finding: synthetic sections only. Hand-trace one quarter of 3 Hallie images and score
+8. Vessel area depends on how the vessel was made: a click runs to mid-wall, the auto rule to the lumen edge (~1 px
+   of radius = ~9% conductance). Not reconciled (2026-11-12, `docs/development/stele_mx.py`).
+7. No real ground truth for cell finding: synthetic sections only (reporting is checked on real masks:
+   `tests/check_results.py`, 2026-11-12; whether tissue tags, cell files and lacunae match a person is not). Hand-trace one quarter of 3 Hallie images and score
    Cellpose against it (`tests/score_against_truth.py` takes a truth project).
 
 ## Working with this lab

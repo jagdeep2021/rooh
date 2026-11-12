@@ -529,8 +529,25 @@ def run(out_dir: Path):
     edit("13_lateral_root_inside_outline", e13, {"n_cortex_cells": 288},
          "shows what happens if the outline takes in the lateral root")
 
+    # 14: two vessels saved as one (a pair touching across a thin wall, one id: Hallie's reviewed images, 2026-11-12):
+    # Make results counts them as two and the Check sheet says so
+    def e14(npz, c, rg, m):
+        y, x = at(MX_AT, 15)
+        y2, x2 = y - 1.7 * MX_R, x                            # a second vessel against the first, same id
+        disc2 = (yy - y2) ** 2 + (xx - x2) ** 2 <= MX_R ** 2
+        m[disc2] = m[y, x]
+        c[disc2] = 0
+        P.save_state(npz, c, rg, m, status="reviewed", **{k: v for k, v in np.load(npz).items()
+                                                         if k not in ("cells", "region", "mx", "status")})
+    i = edit("14_vessels_saved_merged", e14, {"mx_n": 7})
+    chk = pd.read_excel(next((out_dir / "14_vessels_saved_merged/results").glob("traits_*.xlsx")), sheet_name="Check")
+    r = chk.set_index("image_file").loc["S.tif"]
+    check("14_vessels_saved_merged", "Check: vessels_split 1 and a flag", (int(r.vessels_split), "split" in str(r["flags"])),
+          (1, True))
+
     traits_checks(out_dir, base, gray)
     cell_checks(base, gray)
+    vessel_checks(base, gray)
 
 
 def traits(d: Path) -> dict:
@@ -954,6 +971,82 @@ def cell_checks(base: Path, gray):
     check("W5_root_aspect", "round root: 1.00", P.root_aspect(region), 1.0, .01)
     ell = np.where(((yy - C[0]) / 380) ** 2 + ((xx - C[1]) / 475) ** 2 < 1, 1, 0).astype(np.uint8)
     check("W5_root_aspect", "ellipse 475 x 380: 1.25", P.root_aspect(ell), 1.25, .01)
+
+
+def vessel_checks(base: Path, gray):
+    """The vessel rule (P.clean_vessels, 2026-11-12) on known shapes, and the stele as one piece."""
+    def disc(y, x, r):
+        return (yy - y) ** 2 + (xx - x) ** 2 <= r ** 2
+    A = np.pi * MX_R ** 2
+    # V1: two round vessels touching (centres 1.7 r apart), one id: two vessels, equal halves
+    m = (disc(300, 300, MX_R) | disc(300 + 1.7 * MX_R, 300, MX_R)).astype(np.uint16)
+    out, n = P.clean_vessels(m)
+    a = np.bincount(out.ravel())[1:]
+    check("V1_merged_pair", "two touching vessels with one id -> 2 vessels", int(out.max()), 2)
+    check("V1_merged_pair", "split into equal halves (within 3%)", float(a.min() / a.max()), 1.0, .03)
+    # V1b: the same pair 1.95 r apart (barely touching) and 1.3 r apart (deep overlap, wide neck)
+    for d, want in ((1.95, 2), (1.5, 2), (1.2, 1)):
+        m = (disc(300, 300, MX_R) | disc(300 + d * MX_R, 300, MX_R)).astype(np.uint16)
+        check("V1_merged_pair", f"centres {d} r apart -> {want} vessel(s)", int(P.clean_vessels(m)[0].max()), want,
+              note="the limit: centres closer than ~1.4 r, the neck is >= 0.75 r and it reads as one oval vessel")
+    # V2: one oval vessel (1.6 : 1) and one round one stay whole
+    m = (((yy - 300) / 12.5) ** 2 + ((xx - 300) / 20) ** 2 <= 1).astype(np.uint16)
+    out, _ = P.clean_vessels(m)
+    check("V2_oval_whole", "oval vessel 1.6 : 1 -> 1 vessel, area unchanged", (int(out.max()), int((out > 0).sum())),
+          (1, int(m.sum())))
+    m = disc(300, 300, MX_R).astype(np.uint16)
+    check("V2_oval_whole", "round vessel -> 1 vessel, area unchanged", (int(P.clean_vessels(m)[0].max()),
+          int((P.clean_vessels(m)[0] > 0).sum())), (1, int(m.sum())))
+    # V3: a bright speck in the lumen (a hole in the mask) is lumen; a cell sitting in the hole is not
+    m = (disc(300, 300, MX_R) & ~disc(300, 300, 4)).astype(np.uint16)
+    out, n = P.clean_vessels(m)
+    check("V3_hole", "hole filled: area = the full disc", int((out > 0).sum()), int(disc(300, 300, MX_R).sum()))
+    cl = disc(300, 300, 4).astype(np.int32)
+    check("V3_hole", "... unless a cell is there", int((P.clean_vessels(m, cl)[0] > 0).sum()), int(m.sum()))
+    # V4: a pen stroke (2 px wide) saved as a vessel is dropped
+    m = np.zeros((N, N), np.uint16)
+    m[300:302, 200:260] = 1
+    out, n = P.clean_vessels(m)
+    check("V4_stroke", "2 px stroke -> no vessel", (int(out.max()), n["dropped"]), (0, 1))
+    # V5: drawing a vessel that overlaps its neighbour (the editor merges what a drawing touches): still two
+    cells, region, mx, _ = P.load_state(base / "anatomy/masks/S.npz")
+    y, x = at(MX_AT, 15)
+    k0 = int(mx.max())
+    a0 = int((mx == mx[y, x]).sum())
+    P.outline_edit(cells, region, mx, "Metaxylem", disc(y - 1.8 * MX_R, x, MX_R))
+    check("V5_draw_over_neighbour", "a drawn vessel overlapping a neighbour -> one more vessel", int(mx.max()), k0 + 1)
+    check("V5_draw_over_neighbour", "... the neighbour keeps its size (within 5%)", int((mx == mx[y, x]).sum()), a0, .05)
+    # V5b: the reviewer has the last word: a vessel drawn round two lumens stays one, through save and load
+    import tempfile as _tf
+    m = np.zeros((N, N), np.uint16)
+    c = np.zeros((N, N), np.int32)
+    kp = P.outline_edit(c, np.zeros((N, N), np.uint8), m, "Metaxylem", disc(300, 300, MX_R) | disc(300 + 1.7 * MX_R, 300, MX_R))
+    f = Path(_tf.mkdtemp()) / "v.npz"
+    P.save_state(f, c, np.ones((N, N), np.uint8), m, status="reviewed", **P.drawn_mx_arrays([kp], m))
+    check("V5b_drawn_kept", "drawn round two lumens: 1 vessel after save + load", int(P.load_state(f)[2].max()), 1)
+    check("V5b_drawn_kept", "... counted for the Check sheet", P.vessel_fixes(f)["kept_two_bodies"], 1)
+    P.save_state(f, c, np.ones((N, N), np.uint8), m, status="reviewed")      # the same mask, not marked drawn
+    check("V5b_drawn_kept", "the same shape not drawn by hand: split into 2", int(P.load_state(f)[2].max()), 2)
+    # V5c: an auto split undone by drawing round the whole vessel (the debris-rod case, p21__A1_8_5)
+    mm = P.clean_vessels((disc(300, 300, MX_R) | disc(300 + 1.7 * MX_R, 300, MX_R)).astype(np.uint16))[0]
+    kp = P.outline_edit(c, np.zeros((N, N), np.uint8), mm, "Metaxylem", disc(300 + 0.85 * MX_R, 300, 1.9 * MX_R))
+    check("V5c_redraw_joins", "drawing round both halves joins them into 1 drawn vessel", int(len(np.unique(mm)) - 1), 1)
+    # V6: auto pass: two lumens 3 px apart (the closing used to join them) stay two
+    g = np.full((N, N), 0.25)
+    st = np.zeros((N, N), bool)
+    st[150:450, 150:450] = True
+    c = np.zeros((N, N), np.int32)
+    lum = disc(300, 280, 20) | disc(300, 323, 20)
+    mxa = P.measure.label(P.morphology.closing(lum, P.morphology.disk(2))).astype(np.uint16)
+    check("V6_auto_pair", "the old closing joins two lumens 3 px apart (the bug)", int(mxa.max()), 1)
+    check("V6_auto_pair", "... the vessel rule splits them again", int(P.clean_vessels(mxa, c)[0].max()), 2)
+    # S1: a fleck of stele outline in the cortex: back to root; centre, stele area and tissue unchanged
+    _, region, _, _ = P.load_state(base / "anatomy/masks/S.npz")
+    rg = region.copy()
+    rg[disc(*at(300, 60), 8)] = 2
+    cl = P.clean_stele(rg)
+    check("S1_stele_fleck", "fleck back to root: region = the clean one", bool((cl == region).all()), True)
+    check("S1_stele_fleck", "centre unchanged", tuple(np.round(P.centre_of(cl), 3)), tuple(np.round(P.centre_of(region), 3)))
 
 
 if __name__ == "__main__":
