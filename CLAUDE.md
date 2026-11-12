@@ -52,6 +52,9 @@ Read this at the start of every session. Claude Code loads it automatically.
 ## Things that look harmless and are not
 
 - `python3` on a lab Mac is not the Rooh Python: always use `.venv/bin/python`.
+- Start the desktop app for a person with `open "Open app (Mac).command"`, never `server.py local` from an agent's
+  shell: there Finder's folder picker cannot show (osascript answers "User canceled" at once), so Open folder silently
+  does nothing (2026-11-12).
 - Renaming an output column breaks anyone's analysis that reads it. Add the new one and leave the old one for a release, or say so in the log.
 - Changing a threshold changes every past result. That needs a log entry with before / after numbers on real data.
 - `examples/` masks are shipped data: replace them only on purpose, and say so in the commit.
