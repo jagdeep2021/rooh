@@ -383,3 +383,33 @@ Rooh started on 2026-10-27 as `cross_section_anatomy`, was briefly renamed JadNa
   edge (~1 px: ~9% conductance), not yet reconciled.
 - **Re-run:** Make results on every project with vessels (mx_n, vessel areas and conductance change where vessels were
   merged). Look at images the Check sheet flags for vessels.
+
+## 2026-11-12 · Results: this run only, µm and px, masks, Curves sheet; project scale; image delete; project zip
+
+- **Decision:**
+  1. `results/` = `um/` + `px/` (the same files, µm and pixels), `masks/<image>.tif` (4 channels: cells, vessels,
+     tissue code, outlines), `methods_DATE.txt`. Each Make results deletes files Rooh wrote before (any date, old
+     layouts, `earlier_runs/`); files Rooh did not write stay. `full/` only with `--full`.
+  2. cortex_pattern: `Profile` and `Fitted curves` replaced by **`Curves`**: per image × quarter × r_norm bin, mean,
+     median and SD of cell area, plus on every row that quarter's `ccfn`, `cortex_width_um`,
+     `median_cortex_cell_area_um2`, new `file1_cell_area_um2` (mean area of cell file 1), `aerenchyma_share`, and the
+     image's root and stele diameter, stele area, vessel number and mean area, conductance, `plant` and the groups.
+  3. `R/plot_curves.R`: graphs from Curves; plant means first, then mean ± SE over plants; optional design file
+     (image_file + genotype, treatment, ...) joined on the file name, outside the app.
+  4. Scale set with "All" is the project's (`settings.json` `um_per_px`): images added later take it.
+  5. Delete one image (✕ by the image list): web = image + masks to the volume's trash; desktop = nothing deleted
+     (settings.json `removed`, masks to `anatomy/removed/`). Its samples.xlsx row goes.
+  6. "Download project" button (was only inside the delete dialog) and "or a project zip…" under +: a downloaded
+     project comes back as a new project with images, masks, settings, samples and results unchanged.
+  7. START_HERE and README shorter.
+- **Why:** Jagdeep: no unnecessary files in results; the scale set for the project is the project's; a clean
+  per-quarter table of cell size by position to draw curves from, with the key traits on it; masks as images; a pixel
+  copy; simple R graphs a user extends with their own design; delete an image; move a whole project and back.
+- **Evidence:** Hallie's "test" (copy, scale filled): Curves 1460 rows × 22 columns, 22 plants; R graphs drawn.
+  check_results 2325 pass (Curves median, mean and SD per bin recomputed from the cell CSV). Round trip on the same
+  copy: download (46 MB) → import: 84/84 files byte-identical (38 raw, 40 anatomy, 6 results; settings equal), 38
+  images with the same review status, every mask identical. check_numbers 366 pass (layout, px = µm / scale, mask
+  TIF, Curves = Per image / Per quarter); check_app 161 pass with Cellpose, 155 without (round trip, Make results on
+  the copy = the original's numbers, image delete web + desktop).
+- **Re-run:** Make results on every project (new layout; old result files are deleted by the run).
+

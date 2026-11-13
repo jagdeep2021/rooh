@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -93,6 +94,10 @@ COLUMNS = {
     "n_cells": "cells in this bin (kept angles, cortex + epidermis); few_cells = TRUE below " + str(P.MIN_CELLS_PER_BIN),
     "few_cells": f"TRUE when the bin has fewer than {P.MIN_CELLS_PER_BIN} cells: read it with care",
     "median_area_um2": "median cell area in this bin (µm²)",
+    "mean_area_um2": "mean cell area in this bin (µm²)",
+    "sd_area_um2": "standard deviation of cell area in this bin (µm²)",
+    "mean_area_px": "mean cell area in this bin (px²)",
+    "sd_area_px": "standard deviation of cell area in this bin (px²)",
     "rel": "median area in the bin / the image's median cell area (cortex + epidermis): shape without overall size",
     "epidermis_rel": "median area of the cells tagged epidermis (within 6 px of the outline) / the image's median",
     "min_cells_in_bin": "fewest cortical cells in any cortex bin of this image",
@@ -259,38 +264,19 @@ def run_info(anatomy_dir, settings):
 
 
 def start_here(today, n_img, n_rev, no_scale, skipped=(), n_flagged=0):
-    """The first sheet of traits_DATE.xlsx: the files, this run, the unit, what to check, where each answer is."""
+    """The first sheet of traits_DATE.xlsx: the files and this run, in a few lines."""
+    unit = "pixels (every image)" if PX["on"] else "µm (images with a scale; px/ has every image in pixels)"
     rows = [
-        ("FILES", f"traits_{today}.xlsx", "this file: overall anatomy, per image and per quarter (µm)"),
-        ("", f"cortex_pattern_{today}.xlsx", "cell size from the stele out: features of the curve per quarter, the "
-                                             "binned profiles, the fitted curves, aerenchyma by position"),
-        ("", f"cortex_cells_{today}.csv", "one row per kept cortical cell: quarter, position, radius, file, area"),
-        ("", f"all_cells_{today}.csv", "the same for every object, with its cell type (tissue) and kept yes/no"),
-        ("", f"methods_{today}.txt", "the Methods paragraph for these numbers, with the thresholds used"),
-        ("", "figures/", "cortex pattern per group"),
-        ("", "earlier_runs/", "results of earlier runs, moved out of the way (never deleted)"),
-        ("", "README sheet", "every column of this file and of the two CSVs: unit and meaning"),
-        ("THIS RUN", f"{n_img} images", f"{n_rev} of {n_img} checked by hand (status = reviewed); the rest are "
-                                        "computer outlines only"),
-        ("", f"{len(skipped)} measured image(s) left out", "; ".join(f"{r} ({why})" for r, why in skipped) or
-         "none: every measured image is here"),
-        ("", "scale", f"{no_scale} image(s) have no scale: their sizes are blank. Set um_per_px and run again"
-         if no_scale else "every image has a scale"),
-        ("", f"{n_flagged} image(s) flagged", "see the Check sheet before using them" if n_flagged else
-         "the Check sheet found nothing"),
-        ("UNIT", "the plant", "rows are images. Images of one plant are technical replicates: join plant and "
-                              "treatment on image_file, then average per plant or use plant as a random effect. "
-                              "Never use cells, quarters or images as n."),
-        ("QUARTERS", "Q1-Q4", f"Q1 = 0-90 degrees (image right to top), then counter-clockwise. Blank under "
-                              f"{P.MIN_QUARTER_DEG} degrees kept; areas and counts only with all 90 kept"),
-        ("WHERE IS", "root size", "Per image: root_area_um2, root_area_est_um2, root_diameter_um"),
-        ("", "stele + metaxylem", "Per image: stele_area_um2, stele_share, mx_n, mx_area_*, axial conductance"),
-        ("", "CCFN, cortex width, cell size", "Per quarter; Per image = the mean of the quarters"),
-        ("", "aerenchyma", "Per quarter: aerenchyma_share, lacuna_area_um2, n_lacunae; Per image: mean share"),
-        ("", "cell size by file", "Cell area by file (+ Cells per file)"),
-        ("", "the cortex pattern", f"cortex_pattern_{today}.xlsx"),
+        ("files", f"traits_{today}.xlsx: per image, per quarter; Check = images to look at first"),
+        ("", f"cortex_pattern_{today}.xlsx: Curves = cell size from the stele out, per quarter, with the key traits"),
+        ("", f"cortex_cells_{today}.csv, all_cells_{today}.csv: one row per cell"),
+        ("unit", unit),
+        ("this run", f"{n_img} images, {n_rev} reviewed" + (f"; {len(skipped)} left out: " + "; ".join(
+            f"{r} ({why})" for r, why in skipped) if skipped else "") + (f"; {no_scale} without a scale"
+            if no_scale and not PX["on"] else "") + (f"; {n_flagged} flagged (Check)" if n_flagged else "")),
+        ("analysis", "the plant is the unit: average a plant's images, never use cells, quarters or images as n"),
     ]
-    return pd.DataFrame(rows, columns=["", "item", "what / where"])
+    return pd.DataFrame(rows, columns=["", "what"])
 
 
 CHECK_CCFN_GAP = 2   # Check sheet: gaps add >= 2 files in some quarter (ccfn - ccfn_cells_present) = cells missed?
@@ -436,6 +422,7 @@ TRAITS = {
     "cortex_width_um": "root radius minus stele radius, mean over the kept degrees (µm), epidermis included (cortex = "
                        "root - stele). Per image: mean of the quarters",
     "median_cortex_cell_area_um2": "median area of the kept cortical cells (µm²). Per image: mean of the quarters",
+    "file1_cell_area_um2": "mean area of the cells in the innermost cell file (file 1, next to the stele; µm²)",
     "aerenchyma_share": "lacuna pixels / cortex pixels in the kept angles (0-1). Per image: mean of the quarters",
     "quarter": "Q1 = 0-90 degrees (image right to top), then counter-clockwise, around the stele centre",
     "kept_deg": f"degrees of this quarter kept; under {P.MIN_QUARTER_DEG} the quarter is blank",
@@ -544,6 +531,9 @@ CELLS = {   # the two cell CSVs (described in the traits README)
     "area_um2": "cell area (µm²)",
 }
 CURVES = {
+    "r_norm": f"the bin's centre: 0 = stele edge, 1 = root edge ({N_BINS} equal bins); the x of the curve",
+    "mean_area_um2": "mean cell area in the bin (µm²), cortex + epidermis, kept cells",
+    "sd_area_um2": "standard deviation of cell area in the bin (µm²)",
     "quarter": "Q1-Q4 (Q1 = 0-90 degrees, image right to top, counter-clockwise); image = the mean of the quarters "
                "(its kept_deg and n_cells = the sums over those quarters)",
     "kept_deg": f"degrees of the quarter kept; under {P.MIN_QUARTER_DEG} the quarter is blank",
@@ -566,10 +556,46 @@ CURVES = {
 CURVE_SHEETS = {
     "Curve features": "one row per image x quarter (+ quarter = image, the mean of the quarters): features of the "
                       "fitted curve of relative cell size from the stele out (cortex + epidermis, kept cells)",
-    "Profile": f"the binned curve itself: one row per image x quarter x bin ({N_BINS} equal r_norm bins)",
-    "Fitted curves": "the fitted curve at 21 points, per image x quarter (long format)",
+    "Curves": f"the data to draw curves from: one row per image x quarter x bin ({N_BINS} equal r_norm bins): cells, "
+              "mean / median / SD cell area, then the quarter's and the image's key traits (repeated: count images, "
+              "not rows)",
     "Aerenchyma by position": f"one row per image x bin: where the lacunae sit (whole image, kept angles)",
 }
+
+
+ROOH_OUTPUTS = ("traits_", "cortex_pattern_", "cortex_cells_", "all_cells_", "methods_", "anatomy_summary_",
+                "cortex_pattern_full_")
+
+
+def clear_earlier(out_dir: Path, today: str, image_figures: bool, full: bool) -> None:
+    """results/ holds this run only: Rooh's own outputs from earlier runs are deleted (they are remade from the masks
+    by Make results, never edited by hand), as are the earlier_runs/ folder older versions kept, per-image figures
+    not asked for this time, and full/ when --full is not given. A file Rooh did not write is never touched."""
+    import re
+    dated = re.compile(r"_\d{4}-\d{2}-\d{2}\.(xlsx|csv|txt|png)$")
+    ours = lambda f: f.is_file() and dated.search(f.name) and f.name.startswith(ROOH_OUTPUTS)
+    for f in out_dir.glob("*"):
+        if not ours(f):
+            continue
+        if (not f.name.endswith(f"_{today}{f.suffix}")                                # an earlier run
+                or f.name.startswith("anatomy_summary_")                                # old layout
+                or (f.name.startswith("all_cells_") and f.suffix == ".xlsx")
+                or (f.name.startswith("cortex_pattern") and f.suffix == ".xlsx" and _old_pattern(f))):
+            f.unlink()
+    figs = out_dir / "figures"
+    for f in figs.glob("cortex_pattern_*.png"):
+        if not f.name.endswith(f"_{today}.png"):
+            f.unlink()
+    if not image_figures and (figs / "cortex_pattern").is_dir():
+        shutil.rmtree(figs / "cortex_pattern")
+    for sub in ("earlier_runs", "full"):
+        d = out_dir / sub
+        if d.is_dir():
+            for f in d.iterdir():
+                if ours(f) and (sub != "full" or not full or not f.name.endswith(f"_{today}{f.suffix}")):
+                    f.unlink()
+            if not any(d.iterdir()):
+                d.rmdir()
 
 
 def _old_pattern(f: Path) -> bool:
@@ -585,15 +611,26 @@ def _old_pattern(f: Path) -> bool:
 def write_book(path: Path, front: dict, tabs: dict, notes: dict, descr: dict, groups, info, extra_cols=()):
     """front: sheets before the README; tabs: data sheets {name: df}; notes: one line per sheet; descr: column ->
     meaning; extra_cols: (sheet, column, unit, meaning) rows for files outside the workbook (the CSVs)."""
-    rows = [(name, "", "", note) for name, note in notes.items()]
+    tabs = {name: as_px(df) for name, df in tabs.items()}
+    rows = [(name, "", "", px_text(note)) for name, note in notes.items()]
     for name, df in tabs.items():
+        fcols = [c for c in df.columns if str(c).startswith("file_")]
         for c in df.columns:
-            what = (descr.get(c) or describe(c) or ("grouping column from samples.xlsx" if c in groups else "") or
-                    (f"cell file {c[5:]} (1 = next to the stele)" if c.startswith("file_") else ""))
-            unit = ("µm²" if name == "Cell area by file" else "cells") if c.startswith("file_") else \
-                "m⁴ MPa⁻¹ s⁻¹" if c.startswith("axial_conductance") else unit_of(c)
-            rows.append((name, c, unit, what))
-    readme = pd.DataFrame([*rows, *extra_cols], columns=["sheet", "column", "unit", "what it is"])
+            if c in fcols[1:]:
+                continue                                   # file_1 ... file_N: one README row
+            if c in fcols:
+                rows.append((name, f"{fcols[0]} ... {fcols[-1]}", px_text("µm²") if name == "Cell area by file"
+                             else "cells", "cell file 1 (next to the stele) to the outermost"))
+                continue
+            orig = c[:-4] + "_um2" if c.endswith("_px2") else c[:-3] + "_um" if PX["on"] and c.endswith("_px") else c
+            what = (descr.get(orig) or describe(orig) or descr.get(c) or describe(c) or
+                    ("grouping column from samples.xlsx" if c in groups else ""))
+            unit = "m⁴ MPa⁻¹ s⁻¹" if c.startswith("axial_conductance") else \
+                "pixels²" if c.endswith("_px2") else unit_of(orig if PX["on"] else c)
+            rows.append((name, c, px_text(unit), px_text(what)))
+    extra = [(f, px_name(c) if PX["on"] else c, px_text(u), px_text(w)) for f, c, u, w in extra_cols
+             if not (PX["on"] and c in ("area_px",))]
+    readme = pd.DataFrame([*rows, *extra], columns=["sheet", "column", "unit", "what it is"])
     with pd.ExcelWriter(path) as w:
         for name, df in front.items():
             df.to_excel(w, sheet_name=name, index=False)
@@ -605,13 +642,15 @@ def write_book(path: Path, front: dict, tabs: dict, notes: dict, descr: dict, gr
 
 
 def write_traits(path: Path, start, check, per_image, per_quarter, file_area, file_n, groups, info, today):
-    cell_cols = [(f"{kind}_{today}.csv", c, "" if c in ("cell", "tissue", "kept", "file") else unit_of(c) or
+    csvs = "cortex_cells / all_cells .csv"
+    cell_cols = [(csvs, c, "" if c in ("cell", "tissue", "kept", "file") else unit_of(c) or
                   ("radians" if c == "angle_rad" else "pixels" if c.endswith("_px") else "0-1"), CELLS[c])
-                 for kind, cols in (("cortex_cells", CORTEX_CSV), ("all_cells", ALL_CSV)) for c in cols
-                 if c in CELLS]
-    cell_cols = [(f"cortex_cells_{today}.csv", "", "", "one row per kept cortical cell; image_file and the grouping "
-                  "columns first"), (f"all_cells_{today}.csv", "", "", "one row per segmented object, every tissue, "
-                  "kept or not"), *cell_cols]
+                 for c in ALL_CSV if c in CELLS]
+    codes = ", ".join(f"{v} {k}" for k, v in TISSUE_CODE.items())
+    cell_cols += [("masks/<image>.tif", "cells", "id", "channel 1: each cell's id = `cell` in the CSVs"),
+                  ("masks/<image>.tif", "vessels", "id", "channel 2: each vessel's id = `cell` of its metaxylem row"),
+                  ("masks/<image>.tif", "tissue", "code", f"channel 3: 0 background, {codes}"),
+                  ("masks/<image>.tif", "outlines", "code", "channel 4: 0 outside, 1 root, 2 stele")]
     return write_book(path, {"START_HERE": start},
                       {"Check": check, "Per image": per_image, "Per quarter": per_quarter,
                        "Cell area by file": file_area, "Cells per file": file_n},
@@ -619,7 +658,13 @@ def write_traits(path: Path, start, check, per_image, per_quarter, file_area, fi
                        **TRAIT_SHEETS}, TRAITS, groups, info, cell_cols)
 
 
-def write_curves(path: Path, prof, feats, curves, aer, t_q, groups, info):
+CURVE_IMAGE = ["root_diameter_um", "stele_diameter_um", "stele_area_um2", "mx_n", "mx_area_mean_um2",
+               "axial_conductance_m4_MPa_s"]      # whole-image traits repeated on every Curves row
+CURVE_QUARTER = ["ccfn", "cortex_width_um", "median_cortex_cell_area_um2", "file1_cell_area_um2",
+                 "aerenchyma_share"]                     # that quarter's traits
+
+
+def write_curves(path: Path, prof, feats, curves, aer, t_q, groups, info, t_img=None):
     """cortex_pattern_DATE.xlsx: the quarter rule of the traits file applied to the curves. Position basis, relative
     size only; the file and distance bases, _abs, _rel_cortex and whole-section fits are in full/cortex_pattern_full (summarise.py --full)."""
     ids = ["image_file", *groups]
@@ -640,28 +685,26 @@ def write_curves(path: Path, prof, feats, curves, aer, t_q, groups, info):
     f = pd.concat([f, blank], ignore_index=True)
     order = {q: i for i, q in enumerate([*qs, "image"])}
     f = f.sort_values(["image_file", "quarter"], key=lambda s: s.map(order) if s.name == "quarter" else s)
+    # Curves: one row per image x quarter x r_norm bin, the data to draw and model the curves from, with that
+    # quarter's traits and the image's key traits on every row (2026-11-12, Jagdeep)
     pr = prof[(prof.basis == "position") & prof.scope.isin(qs)] if len(prof) else prof
-    pr = pr[[*ids, "scope", "bin", "x_position", "n_cells", "median_area_um2", "rel", "few_cells"]] \
-        .rename(columns={"scope": "quarter"}) if len(pr) else pd.DataFrame()
     if len(pr):
-        im = pr.groupby([*ids, "bin", "x_position"], dropna=False, sort=False) \
-            .agg(n_cells=("n_cells", "sum"), median_area_um2=("median_area_um2", "mean"), rel=("rel", "mean")) \
-            .reset_index().assign(quarter="image")
-        im["few_cells"] = im.n_cells < P.MIN_CELLS_PER_BIN
-        pr = pd.concat([pr, im], ignore_index=True)
-        pr["_b"] = pr.bin.astype(int)
-        pr = pr.sort_values(["image_file", "quarter", "_b"], key=lambda s: s.map(order) if s.name == "quarter" else s) \
-            .drop(columns="_b")
-    cv = curves[(curves.basis == "position") & curves.scope.isin(qs) & (curves.axis == "rel")] if len(curves) else curves
-    cv = cv[[*ids, "scope", "x_position", "fitted"]].rename(columns={"scope": "quarter"}) if len(cv) else pd.DataFrame()
-    if len(cv):
-        cv = pd.concat([cv, cv.groupby([*ids, "x_position"], dropna=False, sort=False).fitted.mean().reset_index()
-                        .assign(quarter="image")], ignore_index=True)
-        cv = cv.sort_values(["image_file", "quarter", "x_position"],
-                            key=lambda s: s.map(order) if s.name == "quarter" else s)
+        pr = pr.rename(columns={"scope": "quarter", "x_position": "r_norm"}).assign(bin=pr.bin.astype(int))
+        pr = pr[[*ids, "quarter", "bin", "r_norm", "n_cells", "mean_area_um2", "median_area_um2", "sd_area_um2"]]
+        if len(t_q):
+            pr = pr.merge(t_q[["image_file", "quarter", *[c for c in CURVE_QUARTER if c in t_q]]],
+                          on=["image_file", "quarter"], how="left")
+        if t_img is not None and len(t_img):
+            pr = pr.merge(t_img[["image_file", *[c for c in CURVE_IMAGE if c in t_img]]], on="image_file", how="left")
+            if "plant" in t_img and "plant" not in pr:      # the unit for any curve statistics
+                pr.insert(len(ids), "plant", pr.image_file.map(t_img.drop_duplicates("image_file")
+                                                               .set_index("image_file").plant))
+        pr = pr.sort_values(["image_file", "quarter", "bin"])
+    else:
+        pr = pd.DataFrame()
     ae = aer[[*ids, "bin", "x", "lacuna_share"]].rename(columns={"x": "x_position"}) if len(aer) else aer
-    return write_book(path, {}, {"Curve features": f, "Profile": pr, "Fitted curves": cv, "Aerenchyma by position": ae},
-                      CURVE_SHEETS, CURVES, groups, info)
+    return write_book(path, {}, {"Curves": pr, "Curve features": f, "Aerenchyma by position": ae},
+                      CURVE_SHEETS, {**TRAITS, **CURVES}, groups, info)
 
 
 CORTEX_CSV = ["cell", "quarter", "x_px", "y_px", "centre_x_px", "centre_y_px", "angle_rad", "r_um",
@@ -677,8 +720,8 @@ def write_cell_csvs(out_dir: Path, today, all_cells, groups):
     exc = a.tissue.astype(str).str.endswith("_excluded")
     a = a.assign(tissue=a.tissue.astype(str).str.removesuffix("_excluded"), kept=np.where(exc, "no", "yes"),
                  quarter="Q" + a.quarter.astype(int).astype(str))
-    a[[*ids, *ALL_CSV]].to_csv(out_dir / f"all_cells_{today}.csv", index=False)
-    a[(a.tissue == "cortex") & (a.kept == "yes")][[*ids, *CORTEX_CSV]] \
+    as_px(a[[*ids, *ALL_CSV]]).to_csv(out_dir / f"all_cells_{today}.csv", index=False)
+    as_px(a[(a.tissue == "cortex") & (a.kept == "yes")][[*ids, *CORTEX_CSV]]) \
         .to_csv(out_dir / f"cortex_cells_{today}.csv", index=False)
 
 
@@ -697,11 +740,17 @@ def make_samples(files: list[Path]) -> pd.DataFrame:
 def write_samples(anatomy_dir: Path) -> Path:
     """samples.xlsx for the user to fill. Rows the user has are never changed; an image measured after the file was
     written gets a new row (before 2026-11-10 it was left out, and Make results then skipped it without a word).
-    New rows take the folder names into the group columns by position (so a renamed group_1 still fills)."""
+    New rows take the folder names into the group columns by position (so a renamed group_1 still fills), and the
+    project's scale if one was set for all images (settings.json um_per_px)."""
     sfile = anatomy_dir / "samples.xlsx"
     masks = sorted((anatomy_dir / "masks").glob("*.npz"))
+    sj = anatomy_dir / "settings.json"
+    proj_scale = json.loads(sj.read_text()).get("um_per_px") if sj.exists() else None   # set with "All" (web page)
     if not sfile.exists():
-        make_samples(masks).to_excel(sfile, index=False)
+        new = make_samples(masks)
+        if proj_scale:
+            new["um_per_px"] = proj_scale
+        new.to_excel(sfile, index=False)
         print(f"\nWrote {sfile}\nFill in um_per_px (microns per pixel) for every image, rename group_1, group_2 ... "
               "(e.g. species, genotype), check plant, then click Make results.")
         return sfile
@@ -711,6 +760,8 @@ def write_samples(anatomy_dir: Path) -> Path:
     have = set(s.image_file.dropna())
     new = make_samples([f for f in masks if str(np.load(f)["image_file"]) not in have])
     if len(new):
+        if proj_scale:                       # the project's scale ("All"): images added later take it too (2026-11-12)
+            new["um_per_px"] = proj_scale
         gcols = [c for c in s.columns if c not in FIXED and not str(c).lower().startswith(NOTE_COLS)]
         new = new.rename(columns={f"group_{k + 1}": c for k, c in enumerate(gcols)})
         pd.concat([s, new], ignore_index=True).to_excel(sfile, index=False)
@@ -750,8 +801,75 @@ def to_um(d: dict, s: float) -> dict:
     return out
 
 
+PX = {"on": False}      # writing the px/ copy: sizes in pixels, columns renamed (as_px)
+
+
+def px_name(c: str) -> str:
+    """A column's name in the px/ copy: _um2 -> _px2, _um -> _px."""
+    return c[:-4] + "_px2" if c.endswith("_um2") else c[:-3] + "_px" if c.endswith("_um") else c
+
+
+def as_px(df: pd.DataFrame) -> pd.DataFrame:
+    """The px/ copy of a table: sizes are in pixels (scale 1), so the µm names say px; columns that only exist because
+    of a scale (um_per_px, conductance in m⁴) go, and a pixel column that now repeats its renamed twin goes."""
+    if not PX["on"] or not len(df.columns):
+        return df
+    new = {c: px_name(c) for c in df.columns}
+    drop = [c for c in df.columns if c in ("um_per_px", "axial_conductance_m4_MPa_s")
+            or (c.endswith("_px") and c in set(new.values()) and new[c] == c and c[:-3] + "_um" in df.columns)
+            or (c.endswith("_px") and c[:-3] + "_um2" in df.columns)]
+    return df.drop(columns=drop).rename(columns=new)
+
+
+def px_text(t: str) -> str:
+    return t.replace("µm²", "px²").replace("µm", "px").replace("um2", "px2") if PX["on"] and isinstance(t, str) else t
+
+
+TISSUE_CODE = {"epidermis": 1, "cortex": 2, "stele": 3, "metaxylem": 4, "air_space": 5, "unassigned": 6, "lacuna": 7}
+
+
+def write_mask(path: Path, cells, mx, region, props, lmask) -> None:
+    """One TIFF per image (ImageJ hyperstack, 4 channels, uint16, zlib): cells (ids = `cell` in the CSVs), vessels
+    (ids = `cell` of the metaxylem rows), tissue (TISSUE_CODE per pixel, lacunae included) and outlines (1 root,
+    2 stele). The masks behind every number, after the vessel and stele rules."""
+    import tifffile
+    t = np.zeros(cells.shape, np.uint16)
+    tis = props.set_index("label").tissue.astype(str).str.removesuffix("_excluded")
+    lut = np.zeros(int(cells.max()) + 1, np.uint16)
+    lut[tis.index.to_numpy(int)] = tis.map(TISSUE_CODE).fillna(0).to_numpy(np.uint16)
+    t = lut[cells]
+    t[mx > 0] = TISSUE_CODE["metaxylem"]
+    if lmask is not None:
+        t[(lmask > 0) & (cells == 0)] = TISSUE_CODE["lacuna"]
+    stack = np.stack([cells.astype(np.uint16), mx.astype(np.uint16), t, region.astype(np.uint16)])
+    tifffile.imwrite(path, stack, imagej=True, compression="zlib",
+                     metadata={"axes": "CYX", "Labels": ["cells", "vessels", "tissue", "outlines"]})
+
+
 def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
-    """The project's tables (xlsx) and group figures. image_figures: also one cortex pattern figure per image
+    """Make results: results/um/ (sizes in µm) and results/px/ (the same tables in pixels, every image), results/masks/
+    (one TIFF per image), results/methods_DATE.txt; --full adds results/full/. Results hold this run only."""
+    res = anatomy_dir.parent / "results"
+    res.mkdir(exist_ok=True)
+    today = dt.date.today().isoformat()
+    clear_earlier(res, today, False, full)          # the old one-folder layout and earlier runs at the top
+    for sub in ("figures",):
+        if (res / sub).is_dir():
+            shutil.rmtree(res / sub)
+    if (res / "masks").is_dir():
+        shutil.rmtree(res / "masks")
+    (res / "masks").mkdir()
+    n = _make(anatomy_dir, res / "um", False, image_figures, full, res)
+    try:
+        PX["on"] = True
+        _make(anatomy_dir, res / "px", True, False, False, res)
+    finally:
+        PX["on"] = False
+    return n
+
+
+def _make(anatomy_dir: Path, out_dir: Path, px: bool, image_figures: bool, full: bool, top: Path):
+    """The project's tables (xlsx) and group figures, in out_dir (px: every size in pixels). image_figures: also one cortex pattern figure per image
     (slow for big sets; the editors draw it live for the image on screen).
     Cortex numbers come from the kept angles only (excluded sectors out, cells by their centre); stele and metaxylem
     are whole-section. Unit of analysis: the plant. Per image first (medians per bin), then plant means; cells are
@@ -767,7 +885,7 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
     tech_rep = samples.groupby(["plant", *groups], dropna=False).cumcount() + 1   # image number within a plant
 
     angle = float(settings.get("quadrant_angle_deg", 0))       # only to read old dropped quarters as sectors
-    fig_dir = anatomy_dir.parent / "results" / "figures" / "cortex_pattern"
+    fig_dir = out_dir / "figures" / "cortex_pattern"
     if image_figures:
         fig_dir.mkdir(parents=True, exist_ok=True)
     img_rows, cell_rows, prof_rows, all_rows, feat_rows, curve_rows, lac_rows, aer_rows = [], [], [], [], [], [], [], []
@@ -775,6 +893,7 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
     skipped = []
     t_img, t_q, t_fa, t_fn = [], [], [], []
     for f in files:
+        npz_path = f                              # (f is reused below)
         z = np.load(f)
         rel = str(z["image_file"])
         if rel not in samples.index or samples.at[rel, "include"] == "no":
@@ -790,7 +909,7 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
         props = P.exclude_sectors(props, arcs)
         st = P.sector_traits(cells, region, props, centre, arcs)
         s = samples.at[rel, "um_per_px"]
-        s = float(s) if pd.notna(s) else np.nan
+        s = 1.0 if px else float(s) if pd.notna(s) else np.nan
         tech = int(tech_rep[rel])
         meta = {"image_file": rel, "plant": samples.at[rel, "plant"], **{g: samples.at[rel, g] for g in groups}}
         whole = {k: tr[k] for k in ("root_area_px", "root_diameter_eq_px", "stele_area_px", "mx_n", "mx_mean_area_px",
@@ -815,6 +934,8 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
             for scope, (sub, kdeg) in scopes.items():
                 pr = P.sector_profile(sub, N_BINS, ref, basis, st["n_cortical_layers"], um_per_px=s)
                 pr["median_area_um2"] = pr.median_area_px * s * s
+                pr["mean_area_um2"] = pr.mean_area_px * s * s
+                pr["sd_area_um2"] = pr.sd_area_px * s * s
                 if basis == "position" and scope == "section":
                     prof = pr
                 prof_rows.append(pr.rename(columns={"x": "x_position"}).assign(**base, basis=basis, scope=scope))
@@ -848,11 +969,19 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
         lac, aprof, n_gaps, lmask = P.lacunae(cells, region, mx, props, centre, arcs, N_BINS, not_lacuna=marks,
                                               drawn=drawn, mask=True)
         lt = P.lacuna_traits(lac, n_gaps, st["cortex_area_kept_px"])
+        if not px:
+            write_mask(top / "masks" / f"{npz_path.stem}.tif", cells, mx, region, props, lmask)
         ti, tq, tfa, tfn = trait_rows({"image_file": rel, **{g: samples.at[rel, g] for g in groups}}, status, s,
                                       region, props, mxp, tr, st, centre, arcs, lac, lmask, cells,
                                       fl.attrs["ray_files"])
         t_img.append({**ti, "vessels_split": vf["split"], "vessels_dropped": vf["dropped"],
                       "drawn_vessels_two_bodies": vf["kept_two_bodies"]})
+        inner = props[props.tissue.isin(P.PATTERN_TISSUES) & props.file.notna()]
+        inner = inner[np.floor(inner.file + 0.5) == 1]
+        for r in tq:                            # the innermost cell file (next to the stele): mean cell area
+            q = int(str(r["quarter"])[1])
+            r["file1_cell_area_um2"] = (inner.area_px[inner.quarter == q].mean() * s * s
+                                        if r["kept_deg"] >= P.MIN_QUARTER_DEG and (inner.quarter == q).any() else np.nan)
         t_q += tq
         t_fa.append(tfa)
         t_fn.append(tfn)
@@ -932,8 +1061,7 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
     aerenchyma_profile = first(pd.concat(aer_rows, ignore_index=True), ["image_file", *keys, "tech_rep", "status"]) \
         if aer_rows else pd.DataFrame()
     spline_curves = pd.DataFrame(curve_rows)
-    out_dir = anatomy_dir.parent / "results"
-    out_dir.mkdir(exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
     today = dt.date.today().isoformat()
     files_out = {
         f"full/cortex_pattern_full_{today}.xlsx": {
@@ -975,15 +1103,7 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
     }
     info = run_info(anatomy_dir, settings)
     n_plant = per_image.groupby(keys, dropna=False).ngroups
-    import re
-    earlier = out_dir / "earlier_runs"          # earlier outputs: kept, out of the way (top = this run only)
-    for f in out_dir.iterdir():                 # earlier dates, and the old-layout workbooks of any date
-        m = re.search(r"_(\d{4}-\d{2}-\d{2})\.(xlsx|csv|txt)$", f.name)
-        if f.is_file() and m and (m.group(1) != today
-                                  or (f.name.startswith(("anatomy_summary", "all_cells_")) and f.suffix == ".xlsx")
-                                  or (f.name.startswith("cortex_pattern") and f.suffix == ".xlsx" and _old_pattern(f))):
-            earlier.mkdir(exist_ok=True)
-            f.replace(earlier / f.name)
+    clear_earlier(out_dir, today, image_figures, full)   # results/ = this run only (2026-11-12, Jagdeep)
     fcols = lambda df: df[[c for c in df.columns if not c.startswith("file_")] +
                           sorted([c for c in df.columns if c.startswith("file_")], key=lambda c: int(c[5:]))]
     t_image = pd.DataFrame(t_img)
@@ -994,11 +1114,12 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
     write_traits(out_dir / f"traits_{today}.xlsx", sh, check, t_image.drop(columns=["frame_deg", "vessels_split", "vessels_dropped", "drawn_vessels_two_bodies"]), pd.DataFrame(t_q), fcols(pd.DataFrame(t_fa)),
                  fcols(pd.DataFrame(t_fn)), groups, info, today)
     write_curves(out_dir / f"cortex_pattern_{today}.xlsx", per_image_profile, profile_features, spline_curves,
-                 aerenchyma_profile, pd.DataFrame(t_q), groups, info)
+                 aerenchyma_profile, pd.DataFrame(t_q), groups, info,
+                 t_image.assign(plant=t_image.image_file.map(per_image.drop_duplicates("image_file").set_index("image_file").plant)))
     write_cell_csvs(out_dir, today, all_cells, groups)
-    if full:                                    # summarise.py --full: the long workbooks the checks and compare.py read
-        (out_dir / "full").mkdir(exist_ok=True)
-    for fname, tabs in (files_out.items() if full else ()):
+    if full and not px:                         # summarise.py --full: the long workbooks the checks and compare.py read
+        (top / "full").mkdir(exist_ok=True)
+    for fname, tabs in (files_out.items() if full and not px else ()):
         tabs = {name: (order_cols(df, [*groups, *notes]) if name in ("per_image", "per_plant") else px_last(df), note)
                 for name, (df, note) in tabs.items()}
         readme = pd.DataFrame([(k, "", "", "", n) for k, (_, n) in tabs.items()],
@@ -1008,7 +1129,7 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
                                "your note from samples.xlsx" if c in notes else ""))
                              for name, (df, _) in tabs.items() for c in df.columns],
                             columns=["sheet", "column", "topic", "unit", "what it is"])
-        with pd.ExcelWriter(out_dir / fname) as w:
+        with pd.ExcelWriter(top / fname) as w:
             pd.DataFrame({"FULL RECORD": [
                 f"Written only with summarise.py --full: every intermediate table, for the checks and compare.py. "
                 f"For analysis use traits_{today}.xlsx, cortex_pattern_{today}.xlsx and the cell CSVs in results/."
@@ -1018,7 +1139,8 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
                 df.to_excel(w, sheet_name=name, index=False)
             info.to_excel(w, sheet_name="run_info", index=False)
     paras = methods_text(per_image, n_plant, today).split("\n\n")         # one line per paragraph: pastes into Word
-    (out_dir / f"methods_{today}.txt").write_text("\n\n".join(" ".join(x.split("\n")) for x in paras) + "\n")
+    if not px:
+        (top / f"methods_{today}.txt").write_text("\n\n".join(" ".join(x.split("\n")) for x in paras) + "\n")
     if len(per_image_profile) and groups:
         sp, gt = groups[0], groups[-1]            # e.g. species, genotype
         (out_dir / "figures").mkdir(exist_ok=True)
@@ -1027,9 +1149,11 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
             drop = d.loc[d.median_area_um2.isna(), "image_file"].nunique() if um else 0
             PP.group_figure(d[d.median_area_um2.notna()] if um else d, gt, spv,
                             "median_area_um2" if um else "median_area_px",
-                            "Cortical cell area (µm²)" if um else "Cortical cell area (px)",
+                            px_text("Cortical cell area (µm²)") if um else "Cortical cell area (px²)",
                             out_dir / "figures" / f"cortex_pattern_{spv}_{today}.png",
                             f"  {drop} image(s) without a scale left out." if drop else "")
+    if px:
+        return len(per_image)
     no_scale = per_image.loc[per_image.um_per_px.isna(), "image_file"].tolist()
     if no_scale:
         print(f"\nWARNING: {len(no_scale)} image(s) have no scale (um_per_px empty); their sizes "
@@ -1041,7 +1165,8 @@ def main(anatomy_dir: Path, image_figures: bool = False, full: bool = False):
     if skipped:
         print(f"\nNOTE: {len(skipped)} measured image(s) left out: " + "; ".join(f"{r} ({why})" for r, why in skipped))
     print(f"{len(per_image)} of {len(files)} measured images ({(per_image.status == 'reviewed').sum()} reviewed), "
-          f"{per_plant.shape[0]} plants -> {out_dir}")
+          f"{per_plant.shape[0]} plants -> {top} (um/, px/, masks/)")
+    return len(per_image)
 
 
 if __name__ == "__main__":
