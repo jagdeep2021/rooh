@@ -413,3 +413,13 @@ Rooh started on 2026-10-27 as `cross_section_anatomy`, was briefly renamed JadNa
   the copy = the original's numbers, image delete web + desktop).
 - **Re-run:** Make results on every project (new layout; old result files are deleted by the run).
 
+
+## 2026-11-12 · README sheet: one row per column; few_cells in Curves
+
+- **Decision:** the traits README lists each column once (with every sheet it is on); metaxylem area statistics and
+  the vessel-rule counts are one row each; the cell CSV and mask TIF columns are described in `docs/traits.md` only.
+  Curves gains `few_cells` (bin with fewer than `MIN_CELLS_PER_BIN` = 5 cells). No number changes.
+- **Why:** Jagdeep: the README was too long (77 rows, half repeats). On Hallie's "test" a quarter's bin holds 1–11
+  cells, so single-quarter curves need the mark.
+- **Evidence:** traits README 77 → 46 rows, cortex_pattern README 33 rows; check_numbers 368 pass (every column still
+  described, none twice, few_cells rule); check_app 155 pass.
