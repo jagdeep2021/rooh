@@ -83,7 +83,7 @@ round lumens, kept as drawn (flag "drawn vessel(s) with two lumens, kept as draw
 - `Curve features`: per image × quarter (+ `image` = the mean of the quarters; its `kept_deg` and `n_cells` are the
   sums): `peak_height`, `peak_pos`, `rise_slope`, `decay_slope`, `outer_rise` of the smoothing spline through the bin
   medians, relative to the image's median cell (section 6). Quarters under 45° kept: a blank row.
-- `Curves`: per image × quarter × bin (10 equal r_norm bins; `r_norm` = the bin centre): `n_cells`,
+- `Curves`: per image × quarter × bin (10 equal r_norm bins; `r_norm` = the bin centre): `n_cells`, `few_cells` (TRUE under `MIN_CELLS_PER_BIN` cells: read with care),
   `mean_area_um2`, `median_area_um2`, `sd_area_um2` (cortex + epidermis, kept cells), then on every row that
   quarter's `ccfn`, `cortex_width_um`, `median_cortex_cell_area_um2`, `file1_cell_area_um2`, `aerenchyma_share` and
   the image's `root_diameter_um`, `stele_diameter_um`, `stele_area_um2`, `mx_n`, `mx_area_mean_um2`,

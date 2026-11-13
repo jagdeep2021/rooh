@@ -509,27 +509,6 @@ def trait_rows(meta, status, s, region, props, mxp, tr, st, centre, arcs, lac, l
     return img, qrows, farea, fn
 
 
-CELLS = {   # the two cell CSVs (described in the traits README)
-    "cell": "the cell's id in the image's mask (metaxylem: vessel number, its own numbering)",
-    "tissue": "cell type: cortex | epidermis (the outermost cells, by position) | stele | metaxylem | air_space "
-              "(small space at a cell junction) | unassigned (not connected to the cortex: debris, fragments)",
-    "kept": "yes = centre in the kept angles; no = in an excluded (damaged) arc. Stele and metaxylem are always yes",
-    "x_px": "centre, pixels from the image's left edge",
-    "y_px": "centre, pixels from the image's top edge",
-    "angle_rad": "direction of the centre from the stele centre, radians, counter-clockwise from the image's right",
-    "r_um": "distance of the centre from the stele centre (µm)",
-    "centre_x_px": "the image's centre for angles and distances (the stele centre, or the one set by hand), pixels "
-                   "from the left edge: x_px - centre_x_px, centre_y_px - y_px give the cell's place in the root",
-    "centre_y_px": "the same, pixels from the top edge",
-    "dist_from_stele_um": "distance from the stele edge to the cell centre (µm), along the line from the centre "
-                          "through the cell (on an oval stele up to ~0.2 cell diameters longer than the shortest "
-                          "distance on the flanks)",
-    "r_norm": "radial position: 0 = stele edge, 1 = root edge, both read along the cell's own direction",
-    "file": "estimated cell file number (1 = next to the stele; cortex and epidermis only): the median of the "
-            "cell's numbers on rays every 0.5 degrees, a gap between cells counted as the cells it would hold",
-    "area_px": "cell area (pixels, to mid-wall)",
-    "area_um2": "cell area (µm²)",
-}
 CURVES = {
     "r_norm": f"the bin's centre: 0 = stele edge, 1 = root edge ({N_BINS} equal bins); the x of the curve",
     "mean_area_um2": "mean cell area in the bin (µm²), cortex + epidermis, kept cells",
@@ -608,11 +587,32 @@ def _old_pattern(f: Path) -> bool:
         wb.close()
 
 
+# README rows that stand for several columns (2026-11-12: one row per column made the README 77 rows long)
+FAMILIES = {
+    "mx_area_mean / median / max / total_um2": (
+        ["mx_area_mean_um2", "mx_area_median_um2", "mx_area_max_um2", "mx_area_total_um2"],
+        "metaxylem vessel area over the section's vessels: mean, median, largest, sum (µm²)"),
+    "vessels_split / vessels_dropped / drawn_vessels_two_bodies": (
+        ["vessels_split", "vessels_dropped", "drawn_vessels_two_bodies"],
+        "what the vessel rule changed in the saved mask: vessels split (two saved as one), pen strokes dropped, "
+        "hand-drawn vessels holding two lumens (kept as drawn)"),
+}
+FAMILY_OF = {c: label for label, (cols, _) in FAMILIES.items() for c in cols}
+
+
+def readme_covers(label: str) -> list:
+    """The columns a README row describes (its own name, or a family's members)."""
+    label = label.replace("_px2", "_um2")
+    return FAMILIES[label][0] if label in FAMILIES else [label]
+
+
 def write_book(path: Path, front: dict, tabs: dict, notes: dict, descr: dict, groups, info, extra_cols=()):
     """front: sheets before the README; tabs: data sheets {name: df}; notes: one line per sheet; descr: column ->
-    meaning; extra_cols: (sheet, column, unit, meaning) rows for files outside the workbook (the CSVs)."""
+    meaning; extra_cols: (sheet, column, unit, meaning) rows for files outside the workbook.
+    README: one row per column (or column family), listing every sheet it is on."""
     tabs = {name: as_px(df) for name, df in tabs.items()}
     rows = [(name, "", "", px_text(note)) for name, note in notes.items()]
+    seen = {}                                          # README label -> its row index (a column on several sheets)
     for name, df in tabs.items():
         fcols = [c for c in df.columns if str(c).startswith("file_")]
         for c in df.columns:
@@ -623,11 +623,21 @@ def write_book(path: Path, front: dict, tabs: dict, notes: dict, descr: dict, gr
                              else "cells", "cell file 1 (next to the stele) to the outermost"))
                 continue
             orig = c[:-4] + "_um2" if c.endswith("_px2") else c[:-3] + "_um" if PX["on"] and c.endswith("_px") else c
-            what = (descr.get(orig) or describe(orig) or descr.get(c) or describe(c) or
+            label = FAMILY_OF.get(orig, c)
+            if label in FAMILIES and PX["on"]:
+                label = label.replace("_um2", "_px2")
+            if label in seen:                          # described already: add this sheet to that row
+                k = seen[label]
+                if name not in rows[k][0].split(", "):
+                    rows[k] = (rows[k][0] + ", " + name, *rows[k][1:])
+                continue
+            fam = FAMILIES.get(FAMILY_OF.get(orig, ""))
+            what = (fam[1] if fam else None) or (descr.get(orig) or describe(orig) or descr.get(c) or describe(c) or
                     ("grouping column from samples.xlsx" if c in groups else ""))
             unit = "m⁴ MPa⁻¹ s⁻¹" if c.startswith("axial_conductance") else \
                 "pixels²" if c.endswith("_px2") else unit_of(orig if PX["on"] else c)
-            rows.append((name, c, px_text(unit), px_text(what)))
+            seen[label] = len(rows)
+            rows.append((name, label, px_text(unit), px_text(what)))
     extra = [(f, px_name(c) if PX["on"] else c, px_text(u), px_text(w)) for f, c, u, w in extra_cols
              if not (PX["on"] and c in ("area_px",))]
     readme = pd.DataFrame([*rows, *extra], columns=["sheet", "column", "unit", "what it is"])
@@ -642,20 +652,12 @@ def write_book(path: Path, front: dict, tabs: dict, notes: dict, descr: dict, gr
 
 
 def write_traits(path: Path, start, check, per_image, per_quarter, file_area, file_n, groups, info, today):
-    csvs = "cortex_cells / all_cells .csv"
-    cell_cols = [(csvs, c, "" if c in ("cell", "tissue", "kept", "file") else unit_of(c) or
-                  ("radians" if c == "angle_rad" else "pixels" if c.endswith("_px") else "0-1"), CELLS[c])
-                 for c in ALL_CSV if c in CELLS]
-    codes = ", ".join(f"{v} {k}" for k, v in TISSUE_CODE.items())
-    cell_cols += [("masks/<image>.tif", "cells", "id", "channel 1: each cell's id = `cell` in the CSVs"),
-                  ("masks/<image>.tif", "vessels", "id", "channel 2: each vessel's id = `cell` of its metaxylem row"),
-                  ("masks/<image>.tif", "tissue", "code", f"channel 3: 0 background, {codes}"),
-                  ("masks/<image>.tif", "outlines", "code", "channel 4: 0 outside, 1 root, 2 stele")]
+    """The cell CSVs and the mask TIFs are described in docs/traits.md, not here (2026-11-12: shorter README)."""
     return write_book(path, {"START_HERE": start},
                       {"Check": check, "Per image": per_image, "Per quarter": per_quarter,
                        "Cell area by file": file_area, "Cells per file": file_n},
                       {"Check": "one row per image: flags = plain reasons to look at the image before using it", 
-                       **TRAIT_SHEETS}, TRAITS, groups, info, cell_cols)
+                       **TRAIT_SHEETS}, TRAITS, groups, info)
 
 
 CURVE_IMAGE = ["root_diameter_um", "stele_diameter_um", "stele_area_um2", "mx_n", "mx_area_mean_um2",
@@ -690,7 +692,9 @@ def write_curves(path: Path, prof, feats, curves, aer, t_q, groups, info, t_img=
     pr = prof[(prof.basis == "position") & prof.scope.isin(qs)] if len(prof) else prof
     if len(pr):
         pr = pr.rename(columns={"scope": "quarter", "x_position": "r_norm"}).assign(bin=pr.bin.astype(int))
-        pr = pr[[*ids, "quarter", "bin", "r_norm", "n_cells", "mean_area_um2", "median_area_um2", "sd_area_um2"]]
+        pr = pr.assign(few_cells=pr.n_cells < P.MIN_CELLS_PER_BIN)      # read with care (2026-11-12)
+        pr = pr[[*ids, "quarter", "bin", "r_norm", "n_cells", "few_cells", "mean_area_um2", "median_area_um2",
+                 "sd_area_um2"]]
         if len(t_q):
             pr = pr.merge(t_q[["image_file", "quarter", *[c for c in CURVE_QUARTER if c in t_q]]],
                           on=["image_file", "quarter"], how="left")

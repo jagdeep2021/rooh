@@ -596,7 +596,12 @@ def traits_checks(out_dir: Path, base: Path, gray):
     ck("no plant column (per image only)", "plant" in t["Per image"].columns, False)
     rd = t["README"]
     cols = {(s, c) for s in ("Per image", "Per quarter") for c in t[s].columns}
-    blank = [c for s, c in cols if rd[(rd.sheet == s) & (rd.column == c)]["what it is"].fillna("").eq("").all()]
+    rd = rd[rd.column.notna()]
+    hit = lambda s, c: rd[rd.sheet.str.split(", ").apply(lambda x: s in x) &
+                          rd.column.apply(lambda lab: c in SUM.readme_covers(lab))]
+    blank = [c for s, c in cols if hit(s, c)["what it is"].fillna("").eq("").all()]
+    ck("README: one row per column (no repeats; file_1 ... differs by sheet)",
+       int(rd.column[~rd.column.str.startswith("file_1 ")].duplicated().sum()), 0)
     ck("README: every column described", ", ".join(blank) or "none", "none")
     tr = (HERE / "docs/traits.md").read_text()
     miss = sorted({c for _, c in cols if f"`{c}`" not in tr} - {"image_file", "status", "um_per_px"})
@@ -650,6 +655,7 @@ def traits_checks(out_dir: Path, base: Path, gray):
     pf = pf[pf.image_file == "S.tif"]
     ck("Curves: 10 bins x 4 quarters", len(pf), 40)
     ck("Curves: plant column (the unit)", "plant" in pf.columns, True)
+    ck("Curves: few_cells = n_cells below the minimum", bool((pf.few_cells == (pf.n_cells < P.MIN_CELLS_PER_BIN)).all()), True)
     ck("Curves: stele_diameter_um = Per image", float(pf.stele_diameter_um.iloc[0]),
        float(t["Per image"].set_index("image_file").at["S.tif", "stele_diameter_um"]), 1e-9)
     ck("Curves: quarter ccfn = Per quarter", ",".join(str(v) for v in pf.groupby("quarter").ccfn.first()),
